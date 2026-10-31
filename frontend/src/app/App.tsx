@@ -31,6 +31,8 @@ function ThemeSync() {
 }
 
 function AppRoutes() {
+  const apiPortalAtRoot = import.meta.env.PROD && import.meta.env.VITE_API_PORTAL_ENABLED === 'true';
+  const apiPortalPath = apiPortalAtRoot ? '/' : '/portal';
   const [selectedRole, setSelectedRole] = useState<DemoRole | null>(null);
   const [navigationError, setNavigationError] = useState('');
   const navigate = useNavigate();
@@ -82,13 +84,13 @@ function AppRoutes() {
   return (
     <>
       <Routes>
-        <Route path={import.meta.env.DEV ? '/portal' : '/'} element={<AppShell />}>
+        <Route path={apiPortalPath} element={<AppShell />}>
           <Route index element={<FinTaxDashboard />} />
           <Route path="documents" element={<DocumentsPage />} />
           <Route path="clients" element={<StaffClientsPage />} />
-          <Route path="*" element={<Navigate to={import.meta.env.DEV ? '/portal' : '/'} replace />} />
+          <Route path="*" element={<Navigate to={apiPortalPath} replace />} />
         </Route>
-        {import.meta.env.DEV && <Route path="/" element={<Navigate to="/demo/client" replace />} />}
+        {!apiPortalAtRoot && <Route path="/" element={<Navigate to="/demo/client" replace />} />}
         <Route path="/demo" element={
           <RoleLoginPage
             error={routeError}

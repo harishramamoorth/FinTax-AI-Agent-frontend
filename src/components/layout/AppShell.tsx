@@ -5,7 +5,7 @@ import { Toaster } from '@/components/ui/overlays';
 import { api } from '@/services/api';
 import { Button } from '@/components/ui/primitives';
 import { FileText, LayoutDashboard, LogOut, Users } from 'lucide-react';
-import { Link, NavLink } from 'react-router-dom';
+import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { FinTaxLogin } from './FinTaxLogin';
 import { ApiError } from '@/services/api';
 import type { FinTaxUser } from '@/types/api';
@@ -14,6 +14,7 @@ import { portalText, usePortalLanguage } from '@/features/fintax/shared/portalLa
 
 export function AppShell() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const language = usePortalLanguage((state) => state.language);
   const setLanguage = usePortalLanguage((state) => state.setLanguage);
   const t = (key: Parameters<typeof portalText>[1]) => portalText(language, key);
@@ -23,6 +24,11 @@ export function AppShell() {
     staleTime: 30_000,
     retry: false,
   });
+  useEffect(() => {
+    if (account.isError && account.error instanceof ApiError && (account.error.status === 0 || account.error.status >= 500)) {
+      navigate('/demo/client', { replace: true });
+    }
+  }, [account.error, account.isError, navigate]);
   const logout = useMutation({
     mutationFn: api.logout,
     onSuccess: () => {
@@ -37,6 +43,9 @@ export function AppShell() {
     return <FinTaxLogin />;
   }
   if (account.isError) {
+    if (account.error instanceof ApiError && (account.error.status === 0 || account.error.status >= 500)) {
+      return <div role="status" className="min-h-full grid place-items-center p-6 text-center text-sm text-muted">FinTax service is unavailable. Opening the browser-only demo…</div>;
+    }
     return <div role="alert" className="min-h-full grid place-items-center p-6 text-center" lang={language}><div className="max-w-md"><p className="text-sm text-bad">{t('serviceError')}: {account.error.message}</p><Link to="/demo/client" className="mt-4 inline-flex items-center gap-2 rounded-lg border hairline px-4 py-2 text-sm text-cyan hover:bg-cyan/5">{t('demoLink')} <FileText className="size-4" /></Link></div></div>;
   }
   if (!account.data) {
