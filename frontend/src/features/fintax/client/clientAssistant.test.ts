@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { CLIENT_DEMO_DOCUMENTS, CLIENT_DEMO_PROFILES } from './clientDemoData';
+import { CLIENT_DEMO_DOCUMENTS, CLIENT_DEMO_PROFILES } from '../shared/clientDemoData';
 import { answerClientQuestion } from './clientAssistant';
 
 const muster = CLIENT_DEMO_PROFILES[0];
+
 const nordlicht = CLIENT_DEMO_PROFILES[1];
 const palm = CLIENT_DEMO_PROFILES[2];
 const docsFor = (email: string) => CLIENT_DEMO_DOCUMENTS.filter((document) => document.clientId === email);

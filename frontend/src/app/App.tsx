@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ErrorBoundary } from './ErrorBoundary';
-import ClientLoginPage from '@/features/fintax/ClientLoginPage';
-import ClientUploadPage from '@/features/fintax/ClientUploadPage';
-import DemoWorkspace from '@/features/fintax/DemoWorkspace';
-import { DEMO_ACCOUNTS, type DemoRole } from '@/features/fintax/demoAccounts';
+import { Toaster } from '@/components/ui/overlays';
+import RoleLoginPage from '@/features/fintax/shared/RoleLoginPage';
+import ClientWorkspace from '@/features/fintax/client/ClientWorkspace';
+import AdminWorkspace from '@/features/fintax/admin/AdminWorkspace';
+import StaffWorkspace from '@/features/fintax/staff/StaffWorkspace';
+import HelpBot from '@/features/fintax/shared/HelpBot';
+import { DEMO_ACCOUNTS, type DemoRole } from '@/features/fintax/shared/demoAccounts';
 import { useUiStore } from '@/stores/uiStore';
+import { useDemoDocumentsStore } from '@/stores/demoDocumentsStore';
 
 function ThemeSync() {
   const theme = useUiStore((state) => state.theme);
@@ -23,6 +27,13 @@ function DemoApp() {
   const [navigationError, setNavigationError] = useState('');
   const navigate = useNavigate();
   const location = useLocation();
+  const hydrateDemoStorage = useDemoDocumentsStore((state) => state.hydrateStorage);
+  const startDemoStorageSync = useDemoDocumentsStore((state) => state.startStorageSync);
+
+  useEffect(() => {
+    void hydrateDemoStorage();
+    return startDemoStorageSync();
+  }, [hydrateDemoStorage, startDemoStorageSync]);
 
   const continueAsDemoUser = (role: DemoRole) => {
     if (!DEMO_ACCOUNTS.some((account) => account.role === role)) {
@@ -30,6 +41,8 @@ function DemoApp() {
       return;
     }
     try {
+      const account = DEMO_ACCOUNTS.find((item) => item.role === role);
+      if (account) useDemoDocumentsStore.getState().recordPeriodAudit('login', account.email, 'Entered the browser-only demo workspace.', account.name, role);
       setSelectedRole(role);
       setNavigationError('');
       navigate(`/demo/${role}`, { state: { demoRole: role } });
@@ -39,6 +52,10 @@ function DemoApp() {
   };
 
   const logout = () => {
+    if (selectedRole) {
+      const account = DEMO_ACCOUNTS.find((item) => item.role === selectedRole);
+      useDemoDocumentsStore.getState().recordPeriodAudit('login', account?.email ?? 'demo-session', 'Signed out of the browser-only demo workspace.', account?.name ?? 'Demo user', selectedRole);
+    }
     setSelectedRole(null);
     setNavigationError('');
     navigate('/', { replace: true });
@@ -51,19 +68,25 @@ function DemoApp() {
     if (location.state) navigate('/', { replace: true, state: null });
   };
 
+  const helpRole: DemoRole = location.pathname.includes('/admin') ? 'admin' : location.pathname.includes('/staff') ? 'staff' : 'client';
+
   return (
+    <>
     <Routes>
       <Route path="/" element={
-        <ClientLoginPage
+        <RoleLoginPage
           error={routeError}
           onSelectRole={resetRoleSelection}
           onContinue={continueAsDemoUser}
         />
       } />
       <Route path="/login" element={<Navigate to="/" replace />} />
-      <Route path="/demo/:role" element={<RoleDashboard selectedRole={selectedRole} onSignOut={logout} />} />
+      <Route path="/demo/:role/*" element={<RoleDashboard selectedRole={selectedRole} onSignOut={logout} />} />
       <Route path="*" element={<Navigate to="/" replace state={{ error: 'That demo page was not found. Choose a demo role to continue.' }} />} />
     </Routes>
+    <HelpBot role={helpRole} />
+    <Toaster />
+    </>
   );
 }
 
@@ -84,9 +107,9 @@ function RoleDashboard({ selectedRole, onSignOut }: { selectedRole: DemoRole | n
     return <Navigate to="/" replace state={{ error: 'That demo account is not available. Please select another role.' }} />;
   }
 
-  return role === 'client'
-    ? <ClientUploadPage clientEmail={account.email} onSignOut={onSignOut} />
-    : <DemoWorkspace role={role} userName={account.name} onSignOut={onSignOut} />;
+  if (role === 'client') return <ClientWorkspace clientEmail={account.email} onSignOut={onSignOut} />;
+  if (role === 'admin') return <AdminWorkspace userName={account.name} onSignOut={onSignOut} />;
+  return <StaffWorkspace userName={account.name} onSignOut={onSignOut} />;
 }
 
 export default function App() {

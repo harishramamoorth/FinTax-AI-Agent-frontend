@@ -1,5 +1,6 @@
 import { sampleFields, type DemoCategory, type DemoDocument, type DemoFields } from './demoWorkflow';
 import { DEMO_CLIENTS, type DemoClientAccount } from './demoAccounts';
+import { folderPathForCategory, periodIdFor } from './storage/periods';
 
 export interface DemoTask {
   id: string;
@@ -68,10 +69,16 @@ function documentRecord(
   details: Record<string, string> = {},
   paymentStatus?: DemoDocument['paymentStatus'],
 ): DemoDocument {
+  const documentDate = fields.documentDate ?? '2026-10-20';
+  const year = Number(documentDate.slice(0, 4)) || 2026;
+  const month = Number(documentDate.slice(5, 7)) || 10;
   return {
     id,
     name,
     category,
+    periodId: periodIdFor(client.email, year, month),
+    folder: folderPathForCategory(category, year, month),
+    mime: name.toLowerCase().endsWith('.jpg') || name.toLowerCase().endsWith('.jpeg') ? 'image/jpeg' : 'application/pdf',
     sizeBytes: 190_000,
     createdAt: '2026-10-20T10:00:00.000Z',
     status,
@@ -135,8 +142,44 @@ export const CLIENT_DEMO_DOCUMENTS: DemoDocument[] = [
   }, { 'Pay period': 'September 2026', 'Gross payroll': '14200.00 EUR', 'Deductions': '2980.00 EUR', 'Net payroll': '11220.00 EUR' }),
   documentRecord(profiles[1], 'NOR-FA-110', 'Nordlicht-tax-office-letter.pdf', 'correspondence', 'needs_information', {
     documentDate: '2026-10-14', counterparty: 'Finanzamt Hamburg', reference: 'FA-HH-2026-110',
-    description: 'Clarification requested for an input VAT entry.',
-  }, { 'Letter summary': 'Finanzamt requests supporting evidence for an input VAT entry by 2026-10-30.' }),
+    description: 'Clarification requested for an input VAT entry. Reply due 2026-11-09.',
+  }, { 'Letter summary': 'Finanzamt requests supporting evidence for an input VAT entry by 2026-11-09.' }),
+  documentRecord(profiles[1], 'NOR-PUR-337-COPY', 'Nordlicht-supplier-337-copy.pdf', 'purchase_invoice', 'review', {
+    documentDate: '2026-10-13', counterparty: 'Bergsport Import KG', reference: 'NOR-PUR-337',
+    netAmount: '920.00', vatRate: '19', vatAmount: '174.80', grossAmount: '1094.80',
+  }),
+  documentRecord(profiles[1], 'NOR-PUR-338', 'Nordlicht-supplier-338.pdf', 'purchase_invoice', 'review', {
+    documentDate: '2026-10-18', counterparty: 'Hanseatic Wholesale GmbH', reference: 'NOR-PUR-338',
+    netAmount: '1000.00', vatRate: '19', vatAmount: '190.00', grossAmount: '1180.00',
+  }),
+  {
+    ...documentRecord(profiles[1], 'NOR-PUR-SEP-044', 'Nordlicht-invoice-wrong-month.pdf', 'purchase_invoice', 'review', {
+      documentDate: '2026-09-30', counterparty: 'Elbe Logistics GmbH', reference: 'EL-044',
+      netAmount: '300.00', vatRate: '19', vatAmount: '57.00', grossAmount: '357.00',
+    }),
+    periodId: periodIdFor(profiles[1].email, 2026, 10),
+    folder: folderPathForCategory('purchase_invoice', 2026, 10),
+  },
+  {
+    ...documentRecord(profiles[1], 'NOR-REC-BLUR', 'Nordlicht-blurry-receipt.jpg', 'receipt', 'review', {
+      documentDate: '2026-10-19', counterparty: 'Muster Markt', reference: 'REC-019',
+      netAmount: '80.00', vatRate: '19', vatAmount: '15.20', grossAmount: '95.20',
+    }),
+    confidence: 0.28,
+    validationWarnings: ['Fictional low-quality photo sample; confirm all fields against a clearer original.'],
+    note: 'Low-confidence sample image for review.',
+  },
+  documentRecord(profiles[1], 'NOR-BANK-0926', 'Nordlicht-bank-statement-September.pdf', 'bank_statement', 'approved', {
+    documentDate: '2026-09-30', counterparty: 'Nordlicht Demo Bank', reference: 'NOR-BANK-0926',
+  }, { 'Opening balance': '9000.00 EUR', 'Closing balance': '10000.00 EUR' }),
+  documentRecord(profiles[1], 'NOR-BANK-1026', 'Nordlicht-bank-statement-October.pdf', 'bank_statement', 'review', {
+    documentDate: '2026-10-31', counterparty: 'Nordlicht Demo Bank', reference: 'NOR-BANK-1026',
+  }, {
+    'Opening balance': '12500.00 EUR',
+    'Closing balance': '12800.00 EUR',
+    'Transaction 1': '2026-10-18 · Customer receipt · Credit: 500.00 EUR',
+    'Transaction 2': '2026-10-24 · Supplier payment · Debit: 200.00 EUR',
+  }),
 
   documentRecord(profiles[2], 'PAL-SALES-221', 'Palm-Grove-export-invoice-221.pdf', 'sales_invoice', 'approved', {
     documentDate: '2026-10-11', counterparty: 'Desert Gate Retail LLC', reference: 'PAL-SALES-221',

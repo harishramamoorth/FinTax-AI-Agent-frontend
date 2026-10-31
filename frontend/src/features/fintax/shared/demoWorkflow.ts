@@ -36,6 +36,9 @@ export interface DemoDocument {
   id: string;
   name: string;
   category: DemoCategory;
+  periodId?: string;
+  folder?: string;
+  mime?: string;
   sizeBytes: number;
   createdAt: string;
   status: 'processing' | 'review' | 'approved' | 'password_required' | 'action_required' | 'needs_information' | 'rejected';
@@ -48,6 +51,8 @@ export interface DemoDocument {
   replacementFor?: string;
   workflowStage?: 'received' | 'validation' | 'classification' | 'extraction' | 'checks' | 'confidence' | 'staff_review' | 'completed';
   detectedLanguage?: string;
+  ocrEngine?: string;
+  ocrPages?: { page: number; confidence: number; text: string }[];
   validationWarnings?: string[];
   extractedDetails?: Record<string, string>;
   reviewHistory?: { at: string; action: string; details: string }[];
@@ -298,9 +303,9 @@ export function accountingCsv(documents: DemoDocument[]): string {
   const rows = documents
     .filter((document) => document.status === 'approved')
     .filter((document) => ['bank_statement', 'purchase_invoice', 'sales_invoice', 'receipt', 'cash_book'].includes(document.category))
-    .map(({ name, fields }) => [
+    .map(({ name, fields, currency }) => [
       fields.documentDate, name, fields.counterparty, fields.description, fields.debitAccount,
-      fields.creditAccount, fields.netAmount, fields.vatRate, fields.vatAmount, fields.grossAmount, 'EUR',
+      fields.creditAccount, fields.netAmount, fields.vatRate, fields.vatAmount, fields.grossAmount, currency ?? 'EUR',
     ]);
   return [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n');
 }

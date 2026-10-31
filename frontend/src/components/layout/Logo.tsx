@@ -1,4 +1,4 @@
-import fintaxLogo from '@/features/fintax/image.png';
+import fintaxLogo from '@/features/fintax/shared/image.png';
 
 export function Logo({ collapsed }: { collapsed?: boolean }) {
   return (

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { sampleFields, type DemoDocument } from '../features/fintax/demoWorkflow';
+import { sampleFields, type DemoDocument } from '../features/fintax/shared/demoWorkflow';
+import { createMonthlyPeriod } from '../features/fintax/shared/storage/periods';
+import type { MonthAnalysis } from '../features/fintax/shared/storage/models';
 import { useDemoDocumentsStore } from './demoDocumentsStore';
 
 const makeDocument = (): DemoDocument => ({
@@ -20,6 +22,8 @@ const makeDocument = (): DemoDocument => ({
 describe('shared demo document store', () => {
   beforeEach(() => useDemoDocumentsStore.setState({
     documents: [],
+    periods: [],
+    periodAudit: [],
     assistantQuestions: [],
     followUpTasks: [],
     bankLinks: [],
@@ -151,6 +155,45 @@ describe('shared demo document store', () => {
       'Demo role assignment changed',
       'Workspace setting changed',
     ]);
+  });
+
+  it('gates month submission on required checklist completion and records the submitted state', () => {
+    const period = createMonthlyPeriod('client-a@example.demo', 2026, 10);
+    useDemoDocumentsStore.setState({ periods: [period], documents: [] });
+    const store = useDemoDocumentsStore.getState();
+    expect(store.submitPeriod(period.id, period.clientId, period.clientId).ok).toBe(false);
+
+    useDemoDocumentsStore.setState({
+      periods: [{
+        ...period,
+        checklist: period.checklist.map((item) => ({ ...item, state: 'uploaded' })),
+      }],
+    });
+    expect(useDemoDocumentsStore.getState().submitPeriod(period.id, period.clientId, period.clientId).ok).toBe(true);
+    expect(useDemoDocumentsStore.getState().periods[0].status).toBe('submitted');
+    expect(useDemoDocumentsStore.getState().periodAudit[0].action).toBe('month_finished');
+  });
+
+  it('requires assigned staff and blocks approval while error findings remain', () => {
+    const period = { ...createMonthlyPeriod('client@fintax.demo', 2026, 10, 'submitted'), submittedAt: '2026-10-22T09:00:00.000Z' };
+    const analysis: MonthAnalysis = {
+      analyzedAt: '2026-10-31T00:00:00.000Z',
+      findings: [{
+        id: 'error-1',
+        severity: 'error',
+        documentIds: [],
+        title: 'Missing statement',
+        evidence: 'Required item absent.',
+        recommendedSolution: 'Request it.',
+        suggestedAction: 'request_document',
+      }],
+    };
+    useDemoDocumentsStore.setState({ periods: [period], documents: [] });
+    expect(useDemoDocumentsStore.getState().reviewMonth(period.id, 'Unassigned reviewer', 'start_review', 'Opening review.', analysis)).toBe(false);
+    expect(useDemoDocumentsStore.getState().reviewMonth(period.id, 'Lena M.', 'start_review', 'Opening review.', analysis)).toBe(true);
+    expect(useDemoDocumentsStore.getState().reviewMonth(period.id, 'Lena M.', 'approve', 'Approve.', analysis)).toBe(false);
+    expect(useDemoDocumentsStore.getState().reviewMonth(period.id, 'Lena M.', 'request_changes', 'Please add the statement.', analysis)).toBe(true);
+    expect(useDemoDocumentsStore.getState().periods[0].status).toBe('changes_requested');
   });
 
 });

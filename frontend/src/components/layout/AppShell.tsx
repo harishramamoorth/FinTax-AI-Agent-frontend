@@ -9,7 +9,7 @@ import { Link, NavLink } from 'react-router-dom';
 import { FinTaxLogin } from './FinTaxLogin';
 import { ApiError } from '@/services/api';
 import type { FinTaxUser } from '@/types/api';
-import fintaxLogo from '@/features/fintax/image.png';
+import fintaxLogo from '@/features/fintax/shared/image.png';
 
 export function AppShell() {
   const queryClient = useQueryClient();

@@ -1,5 +1,5 @@
-import type { DemoDocument } from './demoWorkflow';
-import type { ClientDemoProfile, DemoTask } from './clientDemoData';
+import type { DemoDocument } from '../shared/demoWorkflow';
+import type { ClientDemoProfile, DemoTask } from '../shared/clientDemoData';
 
 export type AssistantLanguage = 'en' | 'de' | 'ar';
 export type AssistantAction = { type: 'view_document'; documentId: string; label: string }

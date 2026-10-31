@@ -19,9 +19,11 @@ import { useDemoDocumentsStore, type ClientAssistantQuestion, type DemoAuditEven
 import StatFlow from './StatFlow';
 import { BottomBar, CountUp, DocCards, NavDrawer, PALETTE, type NavEntry } from './WorkspaceChrome';
 import { FlowDiagram, PulseHero, StaffWorkflow } from './PulseUI';
+import MonthSubmissionsPanel from './MonthSubmissionsPanel';
+import { documentsVisibleTo } from './storage/selectors';
 import fintaxLogo from './image.png';
 
-type Screen = 'overview' | 'documents' | 'review' | 'banking' | 'correspondence' | 'payroll' | 'tasks' | 'exports' | 'clients' | 'admin';
+type Screen = 'overview' | 'documents' | 'review' | 'submissions' | 'banking' | 'correspondence' | 'payroll' | 'tasks' | 'exports' | 'clients' | 'admin';
 
 const SAMPLE_DOCUMENTS: DemoDocument[] = [
   {
@@ -78,6 +80,7 @@ const NAV: NavEntry<Screen>[] = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard, group: 'workspace' },
   { id: 'documents', label: 'Documents', icon: FileText, group: 'workspace' },
   { id: 'review', label: 'Review queue', icon: ClipboardCheck, group: 'workspace' },
+  { id: 'submissions', label: 'Month submissions', icon: FileClock, group: 'workspace' },
   { id: 'banking', label: 'Bank tracking', icon: Banknote, group: 'workspace' },
   { id: 'correspondence', label: 'Correspondence', icon: MessageSquareText, group: 'workspace' },
   { id: 'payroll', label: 'Payroll', icon: Wallet, group: 'manage' },
@@ -91,13 +94,14 @@ const labelFor = (category: DemoCategory) => DEMO_CATEGORIES.find(([key]) => key
 const formatBytes = (bytes: number) => bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 const formatAmount = (value: string) => Number(value || 0).toLocaleString('de-DE', { style: 'currency', currency: 'EUR' });
 
-export default function DemoWorkspace({ role, userName, onSignOut }: { role: DemoRole; userName: string; onSignOut: () => void }) {
+export default function TeamWorkspace({ role, userName, onSignOut }: { role: DemoRole; userName: string; onSignOut: () => void }) {
   const roleLabel = role === 'admin' ? 'Admin' : 'Staff';
   const [screen, setScreen] = useState<Screen>('overview');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [adminSidebarCollapsed, setAdminSidebarCollapsed] = useState(false);
   const reduce = useReducedMotion();
-  const sharedDocuments = useDemoDocumentsStore((state) => state.documents);
+  const allDocuments = useDemoDocumentsStore((state) => state.documents);
+  const sharedDocuments = useMemo(() => documentsVisibleTo(allDocuments, role, userName), [allDocuments, role, userName]);
   const assistantQuestions = useDemoDocumentsStore((state) => state.assistantQuestions);
   const followUpTasks = useDemoDocumentsStore((state) => state.followUpTasks);
   const bankLinks = useDemoDocumentsStore((state) => state.bankLinks);
@@ -172,6 +176,16 @@ export default function DemoWorkspace({ role, userName, onSignOut }: { role: Dem
     setScreen(nextScreen);
   };
 
+  useEffect(() => {
+    const handleHelpNavigation = (event: Event) => {
+      if (!(event instanceof CustomEvent)) return;
+      const item = NAV.find((entry) => entry.id === event.detail);
+      if (item) setScreen(item.id);
+    };
+    window.addEventListener('fintax-navigate-workspace', handleHelpNavigation);
+    return () => window.removeEventListener('fintax-navigate-workspace', handleHelpNavigation);
+  }, []);
+
   const processFiles = async (files: FileList | File[]) => {
     setUploadError('');
     setNotice('');
@@ -199,7 +213,7 @@ export default function DemoWorkspace({ role, userName, onSignOut }: { role: Dem
       setBusyIds((current) => [...current, ...next.map((item) => item.id)]);
       for (const item of next) {
         try {
-          const { processLocalDocument } = await import('./processDocument');
+          const { processLocalDocument } = await import('../client/processDocument');
           const extraction = await processLocalDocument(item.file!, (progress) => {
             updateSharedDocument(item.id, { processingProgress: progress }, userName);
           });
@@ -415,12 +429,12 @@ export default function DemoWorkspace({ role, userName, onSignOut }: { role: Dem
           <span className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-white bg-white shadow-sm"><img src={fintaxLogo} alt="FinTax logo" className="size-full object-contain p-0.5" /></span>
           <div className="workspace-topbar-brand min-w-0 flex-1"><p className="truncate font-semibold leading-tight">FinTax <span className="font-normal text-muted">Consulting</span></p><p className="workspace-topbar-subtitle text-xs text-muted">Client operations workspace</p></div>
           {role === 'admin' && <nav aria-label="Quick workspace navigation" className="hidden items-center gap-0.5 rounded-full bg-slate-100/80 p-1 xl:flex">
-            {(['overview', 'documents', 'review', 'clients'] as Screen[]).map((item) => (
+            {(['overview', 'documents', 'review', 'submissions', 'clients'] as Screen[]).map((item) => (
               <button key={item} type="button" onClick={() => navigateTo(item)} aria-current={screen === item ? 'page' : undefined} className={`rounded-full px-3 py-1.5 text-[11px] font-medium transition-colors ${screen === item ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'}`}>{item === 'review' ? 'Review queue' : item === 'clients' ? 'Clients' : item[0].toUpperCase() + item.slice(1)}</button>
             ))}
           </nav>}
           <Badge tone="warn" className="hidden lg:inline-flex">INTERACTIVE DEMO</Badge>
-          <div className="ml-auto hidden items-center gap-2 text-xs text-muted md:flex"><span className="size-2 rounded-full bg-green" /> Browser-only · no database</div>
+          <div className="ml-auto hidden items-center gap-2 text-xs text-muted md:flex"><span className="size-2 rounded-full bg-green" /> Browser-only · IndexedDB</div>
           <div className="hidden items-center gap-3 border-l hairline pl-4 sm:flex"><div className="grid size-8 place-items-center rounded-full bg-violet/10 text-violet"><Users className="size-4" /></div><div><p className="text-xs font-medium">{userName}</p><p className="text-[11px] text-muted">{roleLabel} Demo User</p></div></div>
           <Button size="sm" aria-label="Log out" title="Log out" className="size-10 shrink-0 p-0 sm:size-auto sm:px-3" onClick={onSignOut} icon={<LogOut className="size-3.5" />}><span className="sr-only sm:not-sr-only">Logout</span></Button>
         </div>
@@ -450,7 +464,7 @@ export default function DemoWorkspace({ role, userName, onSignOut }: { role: Dem
             </nav>
             <div className="mt-5 rounded-lg border border-cyan/15 bg-cyan/5 p-3">
               <div className="flex items-center gap-2 text-xs font-semibold"><LockKeyhole className="size-3.5 text-cyan" />Private demo mode</div>
-              <p className="mt-1.5 text-[11px] leading-4 text-muted">Files are not uploaded to a server. Refreshing this page clears your session data.</p>
+              <p className="mt-1.5 text-[11px] leading-4 text-muted">Monthly documents and periods persist in this browser’s IndexedDB. Other workspace actions remain session-only; nothing is sent to a server.</p>
             </div>
           </aside>
         )}
@@ -458,7 +472,7 @@ export default function DemoWorkspace({ role, userName, onSignOut }: { role: Dem
         <main className="min-w-0 space-y-5 pb-[calc(6rem+env(safe-area-inset-bottom))] sm:space-y-6 lg:pb-12">
           <div className={`flex flex-wrap items-start justify-between gap-4 ${role === 'admin' && screen === 'overview' ? 'sr-only' : ''}`}>
             <div><p className="text-xs font-medium uppercase tracking-[.14em] text-cyan">FinTax · {roleLabel} demo workspace</p><h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">{screen === 'overview' ? `${roleLabel} Dashboard` : screenTitle(screen)}</h1><p className="mt-1.5 max-w-2xl text-sm text-muted">{screenDescription(screen, role)}</p></div>
-            <Badge tone="warn" className="sm:hidden">DEMO · no persistent storage</Badge>
+            <Badge tone="warn" className="sm:hidden">DEMO · browser-only storage</Badge>
           </div>
 
           {notice && <div role="status" className="demo-enter flex items-start gap-2 rounded-lg border border-cyan/20 bg-cyan/5 px-3 py-2.5 text-sm"><CheckCircle2 className="mt-0.5 size-4 shrink-0 text-cyan" /><span className="min-w-0 flex-1">{notice}</span><button type="button" aria-label="Dismiss notice" onClick={() => setNotice('')}><X className="size-4 text-muted" /></button></div>}
@@ -482,6 +496,7 @@ export default function DemoWorkspace({ role, userName, onSignOut }: { role: Dem
             onSelect={setSelectedId} onUpdate={updateSelected} onApprove={approveSelected}
             onRequestCorrection={requestCorrection} onReject={rejectSelected} onNavigate={navigateTo} onReturnToReview={returnDocumentToReview}
           />}
+          {screen === 'submissions' && <MonthSubmissionsPanel role={role === 'admin' ? 'admin' : 'staff'} userName={userName} />}
           {screen === 'banking' && <BankingPanel adminStyle={role === 'admin'} documents={documents} bankLinks={bankLinks} onLink={(statementId, transactionReference, accountingDocumentId) => linkBankRecord(statementId, transactionReference, accountingDocumentId, userName)} onUnlink={(statementId, transactionReference, accountingDocumentId) => unlinkBankRecord(statementId, transactionReference, accountingDocumentId, userName)} />}
           {screen === 'correspondence' && <div className="space-y-5"><CorrespondencePanel adminStyle={role === 'admin'} documents={documents} onOpen={(id) => { setSelectedId(id); setScreen('review'); }} onCreateFollowUp={(document) => { addFollowUpTask({ title: `Follow up: ${document.name}`, clientId: document.clientId, documentId: document.id, dueDate: new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10), owner: userName }, userName); setNotice(`Follow-up task linked to ${document.name} was created.`); }} /><ClientAssistantInbox adminStyle={role === 'admin'} questions={assistantQuestions} userName={userName} onReply={replyToAssistantQuestion} /></div>}
           {screen === 'payroll' && <PayrollPanel adminStyle={role === 'admin'} documents={documents} drafts={payrollDrafts} approvalsEnabled={settings.payrollApprovalsEnabled} onCreateDraft={createPayrollDraft} onValidate={validatePayrollDraft} onApprove={approvePayrollDraft} />}
@@ -492,7 +507,7 @@ export default function DemoWorkspace({ role, userName, onSignOut }: { role: Dem
           </motion.div>
 
           <footer className="flex flex-wrap items-center justify-between gap-2 border-t hairline pt-4 text-[11px] text-muted">
-            <span>FinTax prototype · session data is held in this browser tab only</span>
+            <span>FinTax prototype · documents and monthly periods use browser IndexedDB; other demo actions are session-only</span>
             <span>Sample workflow only · do not upload real personal, payroll, or identity documents</span>
           </footer>
         </main>
@@ -717,7 +732,7 @@ function Overview({ role, documents, reviewCount, approvedCount, attentionCount,
           { label: 'Upcoming client tasks', value: upcomingTasks, screen: 'tasks' as Screen },
         ].map((item) => <button key={item.label} type="button" onClick={() => onNavigate(item.screen)} className="flex w-full items-center justify-between rounded-lg border hairline px-3 py-2.5 text-left text-xs hover:border-cyan/35 hover:bg-cyan/5"><span>{item.label}</span><span className="font-semibold tabular-nums">{item.value}<ChevronRight className="ml-2 inline size-3.5 text-muted" /></span></button>)}</div>
         <div className="mt-4 border-t hairline pt-3"><p className="text-[11px] font-medium">Assigned demo clients</p><ul className="mt-2 space-y-2">{clientCounts.map((client) => <li key={client.id} className="flex items-center justify-between gap-2 text-[11px]"><span className="truncate">{client.company}</span><span className="shrink-0 text-muted">{client.open} open</span></li>)}</ul></div>
-        <div className="mt-4 rounded-lg bg-bg2/70 p-3"><p className="text-[11px] font-medium">Demo processing limits</p><p className="mt-1 text-[11px] leading-4 text-muted">Files stay in this browser session. Selectable PDF text is parsed locally; image OCR and connected AI are not configured.</p></div>
+        <div className="mt-4 rounded-lg bg-bg2/70 p-3"><p className="text-[11px] font-medium">Demo processing limits</p><p className="mt-1 text-[11px] leading-4 text-muted">Documents and monthly periods use browser IndexedDB. PDF text and supported scanned pages are processed locally; OCR needs manual verification and no connected AI is configured.</p></div>
       </Panel>}
     </div>
 
@@ -783,7 +798,7 @@ function DocumentsPanel({ adminStyle, documents, search, onSearch, onDrop, onDra
             </select>
           </label>
           <p className="text-[10px] leading-4 text-muted sm:pb-1">
-            Files remain in this browser demo. Selectable PDF text is read locally; scanned images need manual entry. No OCR, cloud AI, or server upload is used.
+            Files remain in this browser demo. PDF text and supported image/scanned-PDF OCR are processed locally; review every extracted value. No cloud AI or server upload is used.
           </p>
         </div>
         {uploadError && <p role="alert" className="mt-3 rounded-xl border border-bad/20 bg-bad/5 px-3 py-2 text-xs text-bad">{uploadError}</p>}
@@ -1194,6 +1209,9 @@ function screenDescription(screen: Screen, role: DemoRole) {
     overview: 'A role-specific view of the FinTax demo workspace.',
     documents: 'Add PDFs, phone photos, scans and screenshots to a private, in-memory demo queue.',
     review: 'Inspect illustrative extracted fields, resolve validation checks, then approve or request a corrected file.',
+    submissions: role === 'admin'
+      ? 'Read submitted monthly periods, deterministic findings, and review timelines.'
+      : 'Review submitted monthly periods, findings, and client follow-up requests.',
     banking: 'Review statement samples and mark transaction matches for the demo.',
     correspondence: 'Track tax-office letters, owners and reply deadlines.',
     payroll: 'Organize payslips and employee records with a sensitive-data warning.',

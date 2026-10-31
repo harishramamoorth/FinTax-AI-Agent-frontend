@@ -5,37 +5,26 @@ import {
   FileUp, FolderOpen, Languages, ListChecks, LockKeyhole, LogOut, Menu, MessageSquareText, Mic, MoreHorizontal, Paperclip, Plus, Receipt,
   Upload, Wallet, X,
 } from 'lucide-react';
-import { Badge, Button, ProgressBar } from '@/components/ui/primitives';
+import { Badge, Button } from '@/components/ui/primitives';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  categoryForFilename, DEMO_CATEGORIES, detectDocumentLanguage, emptyDemoFields,
+  categoryForFilename, detectDocumentLanguage, emptyDemoFields,
   extractDocumentDetails, MAX_DEMO_FILE_BYTES, validateDemoFile,
   type DemoCategory, type DemoDocument,
-} from './demoWorkflow';
+} from '../shared/demoWorkflow';
 import { useDemoDocumentsStore } from '@/stores/demoDocumentsStore';
-import { DEMO_CLIENTS } from './demoAccounts';
-import { clientProfileFor } from './clientDemoData';
-import fintaxLogo from './image.png';
+import { DEMO_CLIENTS } from '../shared/demoAccounts';
+import { clientProfileFor } from '../shared/clientDemoData';
+import { checklistBlockers, folderPathForCategory, isChecklistComplete } from '../shared/storage/periods';
+import { currentDemoPeriodId } from '../shared/storage/seedPeriods';
+import { documentsVisibleTo } from '../shared/storage/selectors';
+import fintaxLogo from '../shared/image.png';
 import { answerClientQuestion, type AssistantAction, type AssistantLanguage } from './clientAssistant';
-import StatFlow from './StatFlow';
+import ClientDocumentUploadPage from './pages/ClientDocumentUploadPage';
+import ClientDocumentHistoryPage, { type ClientDocumentFilter } from './pages/ClientDocumentHistoryPage';
+import ClientDashboardPage from './pages/ClientDashboardPage';
+import { t3 } from './clientPageUtils';
 
-const MAX_PDF_PAGES = 200;
-const PIPELINE = [
-  ['received', 'Received'], ['validation', 'File validation'], ['classification', 'Classification'], ['extraction', 'Data extraction'],
-  ['checks', 'Validation checks'], ['confidence', 'Confidence'], ['staff_review', 'Staff review'],
-] as const;
-
-const CATEGORY_GROUPS: { label: string; categories: DemoCategory[] }[] = [
-  { label: 'Accounting', categories: ['bank_statement', 'purchase_invoice', 'sales_invoice', 'receipt', 'cash_book'] },
-  { label: 'Payroll', categories: ['payroll', 'timesheet', 'sick_note', 'employee_record'] },
-  { label: 'Company records', categories: ['company_formation', 'commercial_register', 'contract'] },
-  { label: 'Correspondence', categories: ['correspondence', 'other_correspondence'] },
-  { label: 'Identity', categories: ['identity_document'] },
-  { label: 'Other', categories: ['other'] },
-];
-
-const categoryLabel = (category: DemoCategory) => DEMO_CATEGORIES.find(([key]) => key === category)?.[1] ?? category;
-const t3 = (language: AssistantLanguage, en: string, de: string, ar: string) => language === 'de' ? de : language === 'ar' ? ar : en;
-const formatBytes = (bytes: number) => bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 const SPEECH_LANG: Record<AssistantLanguage, string> = { en: 'en-GB', de: 'de-DE', ar: 'ar-AE' };
 
 interface ChatMessage {
@@ -91,19 +80,50 @@ function TypingDots() {
   ))}</span>;
 }
 
-export default function ClientUploadPage({ clientEmail, onSignOut }: { clientEmail: string; onSignOut: () => void }) {
+export default function ClientWorkspace({ clientEmail, onSignOut }: { clientEmail: string; onSignOut: () => void }) {
   const reduce = useReducedMotion();
+  const location = useLocation();
+  const navigate = useNavigate();
   const allDocuments = useDemoDocumentsStore((state) => state.documents);
   const addDocument = useDemoDocumentsStore((state) => state.addDocument);
   const updateDocument = useDemoDocumentsStore((state) => state.updateDocument);
+  const periods = useDemoDocumentsStore((state) => state.periods);
+  const setChecklistItem = useDemoDocumentsStore((state) => state.setChecklistItem);
+  const submitPeriod = useDemoDocumentsStore((state) => state.submitPeriod);
+  const storageError = useDemoDocumentsStore((state) => state.storageError);
+  const quotaWarning = useDemoDocumentsStore((state) => state.quotaWarning);
   const respondToRequest = useDemoDocumentsStore((state) => state.respondToRequest);
   const addAssistantQuestion = useDemoDocumentsStore((state) => state.addAssistantQuestion);
   const assistantQuestions = useDemoDocumentsStore((state) => state.assistantQuestions);
   const [activeClientEmail, setActiveClientEmail] = useState(clientEmail);
+  const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null);
   const activeClient = clientProfileFor(activeClientEmail);
-  const documents = allDocuments.filter((item) => item.clientId === activeClientEmail);
+  const documents = documentsVisibleTo(allDocuments, 'client', activeClientEmail);
+  const clientPeriods = periods
+    .filter((period) => period.clientId === activeClientEmail)
+    .sort((left, right) => right.year - left.year || right.month - left.month);
+  const currentPeriodId = currentDemoPeriodId(activeClientEmail);
+  const activePeriod = clientPeriods.find((period) => period.id === selectedPeriodId)
+    ?? clientPeriods.find((period) => period.id === currentPeriodId)
+    ?? clientPeriods[0];
+  const activePeriodDocuments = activePeriod
+    ? documents.filter((document) => activePeriod.documentIds.includes(document.id))
+    : [];
+  const periodReadOnly = activePeriod?.status === 'submitted' || activePeriod?.status === 'in_review' || activePeriod?.status === 'completed';
+  const canFinishPeriod = Boolean(activePeriod
+    && isChecklistComplete(activePeriod.checklist)
+    && !activePeriodDocuments.some((document) => document.status === 'processing' || document.status === 'action_required' || document.status === 'password_required')
+    && !periodReadOnly);
+  const finishBlockers = activePeriod ? [
+    ...checklistBlockers(activePeriod.checklist).map((item) => `${item.label} is still required.`),
+    ...(activePeriodDocuments.some((document) => document.status === 'processing') ? ['Wait for document processing to finish.'] : []),
+    ...(activePeriodDocuments.some((document) => document.status === 'action_required' || document.status === 'password_required') ? ['Resolve document processing failures.'] : []),
+  ] : ['No monthly period is available for this client.'];
   const clientQuestions = assistantQuestions.filter((question) => question.clientId === activeClientEmail);
-  const [lang, setLang] = useState<AssistantLanguage>('en');
+  const [lang, setLang] = useState<AssistantLanguage>(() => {
+    const saved = localStorage.getItem('fintax-language');
+    return saved === 'de' || saved === 'ar' ? saved : 'en';
+  });
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -111,42 +131,36 @@ export default function ClientUploadPage({ clientEmail, onSignOut }: { clientEma
   const [tasksExpanded, setTasksExpanded] = useState(false);
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [activeBottomSection, setActiveBottomSection] = useState('client-overview');
+  const clientPage: 'dashboard' | 'upload' | 'documents' = location.pathname.endsWith('/upload')
+    ? 'upload'
+    : location.pathname.endsWith('/documents') ? 'documents' : 'dashboard';
   const [category, setCategory] = useState<DemoCategory>('other');
-  const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const [notice, setNotice] = useState('');
   const [dragOver, setDragOver] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [filter, setFilter] = useState<'all' | 'processing' | 'attention' | 'approved'>('all');
+  const [filter, setFilter] = useState<ClientDocumentFilter>('all');
+  const [documentSearch, setDocumentSearch] = useState('');
+  const [folderFilter, setFolderFilter] = useState('all');
   const [responses, setResponses] = useState<Record<string, string>>({});
+  const [notApplicableReasons, setNotApplicableReasons] = useState<Record<string, string>>({});
+  const [finishDialogOpen, setFinishDialogOpen] = useState(false);
+  const [finishConfirmed, setFinishConfirmed] = useState(false);
+  const [finishError, setFinishError] = useState('');
+  const [passwordDialog, setPasswordDialog] = useState<{ fileName: string; resolve: (value: string | null) => void } | null>(null);
+  const [passwordDraft, setPasswordDraft] = useState('');
   const fileInput = useRef<HTMLInputElement>(null);
+  const cameraInput = useRef<HTMLInputElement>(null);
   const pageScrollRef = useRef<HTMLDivElement>(null);
-  const categoryMenuRef = useRef<HTMLDivElement>(null);
-  const categoryTriggerRef = useRef<HTMLButtonElement>(null);
   const chatEnd = useRef<HTMLDivElement>(null);
   const recognition = useRef<any>(null);
   const replacementFor = useRef<string | undefined>();
+  const uploadControllers = useRef(new Map<string, AbortController>());
+  const cancelledUploadIds = useRef(new Set<string>());
 
-  useEffect(() => {
-    if (!categoryMenuOpen) return;
-    const closeOnOutsideClick = (event: PointerEvent) => {
-      if (event.target instanceof Node && !categoryMenuRef.current?.contains(event.target)) {
-        setCategoryMenuOpen(false);
-      }
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setCategoryMenuOpen(false);
-        categoryTriggerRef.current?.focus();
-      }
-    };
-    document.addEventListener('pointerdown', closeOnOutsideClick);
-    document.addEventListener('keydown', closeOnEscape);
-    return () => {
-      document.removeEventListener('pointerdown', closeOnOutsideClick);
-      document.removeEventListener('keydown', closeOnEscape);
-    };
-  }, [categoryMenuOpen]);
+  useEffect(() => () => {
+    uploadControllers.current.forEach((controller) => controller.abort());
+  }, []);
 
   useEffect(() => {
     if (!navigationOpen) return;
@@ -162,17 +176,38 @@ export default function ClientUploadPage({ clientEmail, onSignOut }: { clientEma
   const attention = documents.filter((d) => ATTENTION.includes(d.status));
   const approved = documents.filter((d) => d.status === 'approved');
   const activity = documents.filter((d) => ['approved', ...ATTENTION].includes(d.status));
+  const documentFolders = [...new Set(documents.map((document) => document.folder ?? folderPathForCategory(
+    document.category,
+    Number(document.fields.documentDate.slice(0, 4)) || new Date(document.createdAt).getFullYear(),
+    Number(document.fields.documentDate.slice(5, 7)) || new Date(document.createdAt).getMonth() + 1,
+  )))].sort();
+  const normalizedDocumentSearch = documentSearch.trim().toLowerCase();
   const visibleDocs = documents.filter((document) => {
-    if (filter === 'all') return true;
-    if (filter === 'processing') return document.status === 'processing' || document.status === 'review';
-    if (filter === 'attention') return ATTENTION.includes(document.status);
-    return document.status === 'approved';
+    const matchesStatus = filter === 'all'
+      || (filter === 'processing' && (document.status === 'processing' || document.status === 'review'))
+      || (filter === 'attention' && ATTENTION.includes(document.status))
+      || (filter === 'approved' && document.status === 'approved');
+    const folder = document.folder ?? folderPathForCategory(
+      document.category,
+      Number(document.fields.documentDate.slice(0, 4)) || new Date(document.createdAt).getFullYear(),
+      Number(document.fields.documentDate.slice(5, 7)) || new Date(document.createdAt).getMonth() + 1,
+    );
+    const searchableText = [
+      document.name,
+      document.category,
+      folder,
+      document.extractedText,
+      ...Object.values(document.fields),
+      ...Object.values(document.extractedDetails ?? {}),
+    ].join(' ').toLowerCase();
+    return matchesStatus
+      && (folderFilter === 'all' || folder === folderFilter)
+      && (!normalizedDocumentSearch || searchableText.includes(normalizedDocumentSearch));
   });
   const started = messages.some((m) => m.role === 'client');
   const hour = new Date().getHours();
   const greeting = t3(lang, hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening', hour < 12 ? 'Guten Morgen' : hour < 18 ? 'Guten Tag' : 'Guten Abend', hour < 12 ? 'صباح الخير' : 'مساء الخير');
   const pageSections = [
-    { id: 'client-assistant', label: 'AI assistant', icon: MessageSquareText },
     { id: 'client-overview', label: 'Overview', icon: BarChart3 },
     { id: 'client-demo-tasks', label: 'Tasks', icon: ListChecks },
     ...(activity.length ? [{ id: 'client-advisor-updates', label: 'Advisor updates', icon: CalendarClock }] : []),
@@ -180,14 +215,20 @@ export default function ClientUploadPage({ clientEmail, onSignOut }: { clientEma
     { id: 'client-documents', label: 'Document history', icon: FolderOpen },
   ];
 
+  useEffect(() => {
+    setActiveBottomSection(clientPage === 'upload' ? 'client-upload' : clientPage === 'documents' ? 'client-documents' : 'client-overview');
+  }, [clientPage]);
+
   const goToPageSection = (sectionId: string) => {
     setActiveBottomSection(sectionId);
-    const container = pageScrollRef.current;
-    const target = document.getElementById(sectionId);
-    if (container && target) {
-      const top = container.scrollTop + target.getBoundingClientRect().top - container.getBoundingClientRect().top - 16;
-      container.scrollTo({ top, behavior: 'auto' });
-    }
+    const nextPage = sectionId === 'client-upload' ? 'upload' : sectionId === 'client-documents' ? 'documents' : 'dashboard';
+    const route = nextPage === 'dashboard' ? '/demo/client' : `/demo/client/${nextPage}`;
+    if (location.pathname !== route) navigate(route);
+    pageScrollRef.current?.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
+    window.setTimeout(() => {
+      const target = document.getElementById(sectionId);
+      if (target && sectionId !== 'client-overview') target.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'center' });
+    }, 60);
     setNavigationOpen(false);
   };
 
@@ -249,8 +290,28 @@ export default function ClientUploadPage({ clientEmail, onSignOut }: { clientEma
     }
   };
 
+  const cancelUpload = (item: DemoDocument) => {
+    const controller = uploadControllers.current.get(item.id);
+    if (controller) controller.abort();
+    else cancelledUploadIds.current.add(item.id);
+    if (passwordDialog?.fileName === item.name) {
+      passwordDialog.resolve(null);
+      setPasswordDialog(null);
+    }
+    updateDocument(item.id, {
+      status: 'action_required',
+      workflowStage: 'staff_review',
+      note: 'Processing was canceled. Upload the document again to retry.',
+    });
+    setNotice(`Processing canceled for ${item.name}.`);
+  };
+
   const processFiles = async (files: FileList | File[]) => {
     setUploadError(''); setNotice('');
+    if (!activePeriod || periodReadOnly) {
+      setUploadError('This month is read-only. Select an open month before uploading documents.');
+      return;
+    }
     const accepted: DemoDocument[] = [];
     const rejected: string[] = [];
     const targetReplacement = replacementFor.current;
@@ -260,47 +321,133 @@ export default function ClientUploadPage({ clientEmail, onSignOut }: { clientEma
       const id = `CLIENT-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
       const selectedCategory = category === 'other' ? categoryForFilename(file.name) : category;
       const doc: DemoDocument = {
-        id, name: file.name, category: selectedCategory, sizeBytes: file.size, createdAt: new Date().toISOString(), status: 'processing', confidence: 0,
+        id, name: file.name, category: selectedCategory, periodId: activePeriod.id,
+        folder: folderPathForCategory(selectedCategory, activePeriod.year, activePeriod.month), mime: file.type,
+        sizeBytes: file.size, createdAt: new Date().toISOString(), status: 'processing', confidence: 0,
         fields: emptyDemoFields(), sample: false, clientId: activeClientEmail, currency: activeClient.currency, workflowStage: 'received', detectedLanguage: 'Detecting locally',
         validationWarnings: [], reviewHistory: [{ at: new Date().toISOString(), action: 'Received', details: 'Added in the browser-only demo session.' }],
-        file, processingProgress: 0, note: 'Demo metadata and file are held in browser memory only.', replacementFor: targetReplacement,
+        file, processingProgress: 0, note: 'The original is being saved to this browser’s IndexedDB.', replacementFor: targetReplacement,
       };
       if (targetReplacement) {
         const previous = useDemoDocumentsStore.getState().documents.find((e) => e.id === targetReplacement);
         if (previous?.clientRequest) {
           useDemoDocumentsStore.getState().recordReview(targetReplacement, 'Replacement uploaded', `Client uploaded ${file.name} as a replacement.`,
-            { clientRequest: { ...previous.clientRequest, response: `Replacement uploaded: ${file.name}`, resolvedAt: new Date().toISOString() } });
+            { clientRequest: { ...previous.clientRequest, response: `Replacement uploaded: ${file.name}`, resolvedAt: new Date().toISOString() } }, activeClientEmail);
         }
       }
       addDocument(doc); accepted.push(doc);
     }
     replacementFor.current = undefined;
+    const cancelledNames: string[] = [];
     for (const doc of accepted) {
+      if (cancelledUploadIds.current.delete(doc.id)) {
+        updateDocument(doc.id, {
+          status: 'action_required',
+          workflowStage: 'staff_review',
+          note: 'Processing was canceled before it started. Upload the document again to retry.',
+        });
+        cancelledNames.push(doc.name);
+        continue;
+      }
+      const controller = new AbortController();
+      uploadControllers.current.set(doc.id, controller);
       const stage = (workflowStage: NonNullable<DemoDocument['workflowStage']>, note: string, processingProgress: number) => updateDocument(doc.id, { workflowStage, note, processingProgress });
       try {
         stage('validation', 'Checking file type, size and readability.', 12);
         await new Promise((r) => window.setTimeout(r, 320));
-        stage('classification', 'Suggesting a document category from the filename and local PDF text.', 26);
+        stage('classification', 'Suggesting a document category from the filename and local text.', 26);
         await new Promise((r) => window.setTimeout(r, 320));
-        stage('extraction', 'Reading selectable PDF text locally; image OCR is not configured.', 38);
+        stage('extraction', 'Reading text locally in this browser.', 38);
         const { processLocalDocument } = await import('./processDocument');
-        const extraction = await processLocalDocument(doc.file!, (p) => updateDocument(doc.id, { processingProgress: Math.min(82, 38 + Math.round(p * 0.44)) }));
+        const reportProgress = (progress: number, stageName?: string) => updateDocument(doc.id, {
+            processingProgress: Math.min(82, 38 + Math.round(progress * 0.44)),
+            ...(stageName ? { note: stageName } : {}),
+          });
+        const process = (password?: string) => processLocalDocument(
+          doc.file!,
+          reportProgress,
+          password,
+          lang === 'ar' ? 'deu+eng+ara' : 'deu+eng',
+          controller.signal,
+        );
+        let extraction: Awaited<ReturnType<typeof processLocalDocument>>;
+        try {
+          extraction = await process();
+        } catch (error) {
+          if (!(error instanceof Error && 'code' in error && error.code === 'password_required')) throw error;
+          const password = await new Promise<string | null>((resolve) => {
+            setPasswordDraft('');
+            setPasswordDialog({ fileName: doc.name, resolve });
+          });
+          if (!password) throw new Error('Password entry was cancelled. Upload an unlocked copy to continue.');
+          extraction = await process(password);
+        }
         const detectedCategory = doc.category === 'other' ? categoryForFilename(doc.name, extraction.text) : doc.category;
         const detectedLanguage = detectDocumentLanguage(extraction.text);
-        const extracted: DemoDocument = { ...doc, category: detectedCategory, fields: extraction.fields, extractedDetails: extractDocumentDetails(detectedCategory, extraction.text), extractedText: extraction.text, confidence: extraction.confidence, pageCount: extraction.pageCount ?? undefined, detectedLanguage, note: extraction.note };
+        const extracted: DemoDocument = {
+          ...doc,
+          category: detectedCategory,
+          folder: folderPathForCategory(detectedCategory, activePeriod.year, activePeriod.month),
+          fields: extraction.fields,
+          extractedDetails: extractDocumentDetails(detectedCategory, extraction.text),
+          extractedText: extraction.text,
+          ocrPages: extraction.pages,
+          ocrEngine: extraction.ocrEngine,
+          confidence: extraction.confidence,
+          pageCount: extraction.pageCount ?? undefined,
+          detectedLanguage,
+          note: extraction.note,
+        };
         stage('checks', 'Running simple field-presence and amount checks. These are not accounting controls.', 88);
         const warnings = validationWarnings(extracted);
         await new Promise((r) => window.setTimeout(r, 320));
         stage('confidence', 'Confidence is a rule-based text-match estimate, not an AI score.', 95);
-        updateDocument(doc.id, { category: detectedCategory, fields: extraction.fields, extractedDetails: extracted.extractedDetails, extractedText: extraction.text, confidence: extraction.confidence, pageCount: extraction.pageCount ?? undefined, detectedLanguage, validationWarnings: warnings, workflowStage: 'staff_review', status: 'review', processingProgress: 100, note: extraction.note });
+        updateDocument(doc.id, {
+          category: detectedCategory,
+          folder: extracted.folder,
+          fields: extraction.fields,
+          extractedDetails: extracted.extractedDetails,
+          extractedText: extraction.text,
+          ocrPages: extraction.pages,
+          ocrEngine: extraction.ocrEngine,
+          confidence: extraction.confidence,
+          pageCount: extraction.pageCount ?? undefined,
+          detectedLanguage,
+          validationWarnings: warnings,
+          workflowStage: 'staff_review',
+          status: 'review',
+          processingProgress: 100,
+          note: extraction.note,
+        });
       } catch (error) {
-        const passwordRequired = error instanceof Error && 'code' in error && (error as any).code === 'password_required';
+        if (controller.signal.aborted) {
+          cancelledUploadIds.current.delete(doc.id);
+          cancelledNames.push(doc.name);
+          updateDocument(doc.id, {
+            status: 'action_required',
+            workflowStage: 'staff_review',
+            validationWarnings: [],
+            note: 'Processing was canceled. Upload the document again to retry.',
+          });
+          uploadControllers.current.delete(doc.id);
+          continue;
+        }
+        const passwordRequired = error instanceof Error && 'code' in error && error.code === 'password_required';
         const message = error instanceof Error ? error.message : 'The file could not be read.';
-        const reason = passwordRequired ? 'This PDF is password-protected. Please upload an unlocked copy; password entry is not supported in this demo.' : 'The file could not be read in this demo. Please upload a clearer copy or provide more information.';
+        const reason = passwordRequired
+          ? 'This PDF is password-protected or the password was incorrect. Please provide the correct password or upload an unlocked copy.'
+          : message;
         updateDocument(doc.id, { status: passwordRequired ? 'password_required' : 'action_required', workflowStage: 'staff_review', validationWarnings: [reason], clientRequest: { reason, createdAt: new Date().toISOString() }, note: message });
       }
+      uploadControllers.current.delete(doc.id);
     }
-    if (accepted.length) { setExpandedId(accepted[0].id); setFilter('all'); setNotice(`${accepted.length} file${accepted.length === 1 ? '' : 's'} added to the shared browser demo review queue.`); }
+    if (accepted.length) {
+      setExpandedId(accepted[0].id);
+      setFilter('all');
+      setNotice(cancelledNames.length
+        ? `${cancelledNames.length} file${cancelledNames.length === 1 ? '' : 's'} canceled; remaining queued files finished processing.`
+        : `${accepted.length} file${accepted.length === 1 ? '' : 's'} added to the shared browser demo review queue.`);
+    }
     if (rejected.length) setUploadError(rejected.join(' '));
   };
 
@@ -383,7 +530,14 @@ export default function ClientUploadPage({ clientEmail, onSignOut }: { clientEma
               </select>
             </label>
             <label className="flex h-9 shrink-0 items-center gap-1 rounded-full border border-white bg-white/80 px-2 shadow-sm sm:gap-1.5 sm:px-2.5"><Languages className="size-4 text-violet" /><span className="sr-only">Language</span>
-              <select value={lang} onChange={(e) => setLang(e.target.value as AssistantLanguage)} aria-label="Assistant language" className="h-9 max-w-[5.25rem] bg-transparent text-xs text-ink sm:max-w-[4.75rem] lg:max-w-none"><option value="en">English</option><option value="de">Deutsch</option><option value="ar">العربية</option></select></label>
+              <select value={lang} onChange={(e) => {
+                const next = e.target.value as AssistantLanguage;
+                setLang(next);
+                localStorage.setItem('fintax-language', next);
+                document.documentElement.lang = next;
+                document.documentElement.dir = next === 'ar' ? 'rtl' : 'ltr';
+                window.dispatchEvent(new CustomEvent('fintax-language-change', { detail: next }));
+              }} aria-label="Assistant language" className="h-9 max-w-[5.25rem] bg-transparent text-xs text-ink sm:max-w-[4.75rem] lg:max-w-none"><option value="en">English</option><option value="de">Deutsch</option><option value="ar">العربية</option></select></label>
             <Button size="sm" aria-label="Log out" title="Log out" className="size-9 shrink-0 rounded-xl bg-white/80 p-0 sm:size-auto sm:rounded-full sm:px-3" onClick={onSignOut} icon={<LogOut className="size-3.5" />}><span className="sr-only sm:not-sr-only">Logout</span></Button>
           </div>
         </div>
@@ -419,15 +573,40 @@ export default function ClientUploadPage({ clientEmail, onSignOut }: { clientEma
             </nav>
             <div className="mt-auto rounded-xl border border-violet/10 bg-gradient-to-br from-violet/5 to-blue/5 p-3.5">
               <p className="text-xs font-semibold">About this workspace</p>
-              <p className="mt-1 text-[11px] leading-5 text-muted">A browser-only FinTax demo using fictional client records. Uploaded files stay in this active session and are not sent to a server.</p>
+              <p className="mt-1 text-[11px] leading-5 text-muted">A browser-only FinTax demo using fictional client records. Documents and monthly periods are saved in this browser’s IndexedDB and are not sent to a server.</p>
             </div>
           </motion.aside>
         </>}
       </AnimatePresence>
 
       <main className="relative z-10 mx-auto max-w-6xl space-y-5 px-3 pb-12 pt-4 sm:space-y-8 sm:px-6 sm:pb-16 sm:pt-6">
+        {clientPage === 'dashboard' && <ClientDashboardPage
+          activeClient={activeClient}
+          activeClientEmail={activeClientEmail}
+          documents={documents}
+          clientPeriods={clientPeriods}
+          activePeriod={activePeriod}
+          periodReadOnly={periodReadOnly}
+          canFinishPeriod={canFinishPeriod}
+          finishBlockers={finishBlockers}
+          language={lang}
+          greeting={greeting}
+          quotaWarning={quotaWarning}
+          storageError={storageError}
+          documentFilter={filter}
+          onDocumentFilterChange={setFilter}
+          onOpenDocuments={() => goToPageSection('client-documents')}
+          onOpenUpload={() => fileInput.current?.click()}
+          onSelectPeriod={setSelectedPeriodId}
+          onSetNotApplicable={(periodId, key, reason, clientId) => setChecklistItem(periodId, key, 'not_applicable', reason, clientId)}
+          onSetUploadCategory={setCategory}
+          onFinishPeriod={() => { setFinishError(''); setFinishConfirmed(false); setFinishDialogOpen(true); }}
+          onRespondToRequest={respondToRequest}
+          onUploadReplacement={selectReplacement}
+        />}
+
         {/* HERO + ASSISTANT */}
-        <motion.section id="client-assistant" layout {...rise(0)} className="relative scroll-mt-24 overflow-hidden rounded-3xl border border-white/70 bg-gradient-to-br from-white/80 via-[#f1eeff]/80 to-[#eaf2ff]/80 p-4 shadow-[0_30px_80px_-40px_rgba(110,80,220,.45)] backdrop-blur-xl sm:rounded-[2rem] sm:p-9">
+        <motion.section id="client-assistant" layout {...rise(0)} className="hidden">
           <AnimatePresence initial={false}>
             {!started && (
               <motion.div key="hero" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.4 }} className="overflow-hidden">
@@ -498,157 +677,106 @@ export default function ClientUploadPage({ clientEmail, onSignOut }: { clientEma
           </form>
           <p className="mx-auto mt-2.5 max-w-prose text-center text-[10px] leading-4 text-muted">{t3(lang, 'Deterministic demo answers from fictional records. No AI model is connected.', 'Regelbasierte Demo-Antworten aus fiktiven Daten. Kein KI-Modell verbunden.', 'إجابات تجريبية محددة القواعد من بيانات خيالية. لا يوجد نموذج ذكاء اصطناعي متصل.')}</p>
           {notice && <p role="status" className="mt-2 text-center text-xs text-violet">{notice}</p>}
-          <input ref={fileInput} id="client-document-upload" type="file" multiple className="sr-only" aria-label="Choose files to upload" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.tif,.tiff,.bmp,application/pdf,image/*" onChange={handleFiles} />
         </motion.section>
 
-        {/* STATS */}
-        <section id="client-overview" aria-label="Overview" className="scroll-mt-24">
-          <StatFlow
-            items={statCards.map((item) => ({
-              ...item,
-              value: <CountUp value={item.value} />,
-            }))}
-            activeKey={filter}
-            onSelect={(key) => {
-              if (key === 'all' || key === 'processing' || key === 'attention' || key === 'approved') setFilter(key);
-              const container = pageScrollRef.current;
-              const target = document.getElementById('client-documents');
-              if (container && target) {
-                const top = container.scrollTop + target.getBoundingClientRect().top - container.getBoundingClientRect().top - 16;
-                container.scrollTo({ top, behavior: reduce ? 'auto' : 'smooth' });
-              }
-            }}
-          />
-        </section>
-
-        {/* NEXT STEPS */}
-        <section className="grid scroll-mt-24 gap-4 lg:grid-cols-3" aria-label="Next steps">
-          <motion.div {...rise(1)} className="rounded-3xl border border-white bg-white/80 p-4 shadow-sm backdrop-blur sm:p-5">
-            <p className="flex items-center gap-2 text-sm font-semibold"><FileSearch className="size-4 text-warn" />{t3(lang, 'Missing documents', 'Fehlende Unterlagen', 'مستندات ناقصة')}</p>
-            <ul className="mt-3 space-y-2">{activeClient.missingDocuments.length ? activeClient.missingDocuments.map((m) => <li key={m} className="flex items-center gap-2 rounded-xl bg-warn/10 px-3 py-2 text-xs"><span className="size-1.5 rounded-full bg-warn" />{m}</li>) : <li className="text-xs text-muted">{t3(lang, 'Nothing missing — great!', 'Nichts fehlt — super!', 'لا شيء ناقص — ممتاز!')}</li>}</ul>
-            <Button size="sm" variant="primary" className="mt-4 rounded-full" icon={<Upload className="size-3.5" />} onClick={() => fileInput.current?.click()}>{t3(lang, 'Upload now', 'Jetzt hochladen', 'ارفع الآن')}</Button>
-          </motion.div>
-          <motion.div {...rise(2)} className="rounded-3xl border border-white bg-white/80 p-4 shadow-sm backdrop-blur sm:p-5 lg:col-span-2" id="client-demo-tasks">
-            <div className="flex items-center justify-between"><p className="flex items-center gap-2 text-sm font-semibold"><ListChecks className="size-4 text-violet" />{t3(lang, 'Your tasks', 'Ihre Aufgaben', 'مهامك')}</p>
-              <button type="button" onClick={() => setTasksExpanded((v) => !v)} aria-expanded={tasksExpanded} className="flex items-center gap-1 text-xs text-violet">{tasksExpanded ? t3(lang, 'Less', 'Weniger', 'أقل') : t3(lang, 'All', 'Alle', 'الكل')}<ChevronDown className={`size-3.5 transition-transform ${tasksExpanded ? 'rotate-180' : ''}`} /></button></div>
-            <ul className="mt-3 space-y-2">{activeClient.tasks.slice(0, tasksExpanded ? undefined : 2).map((task, i) => (
-              <motion.li key={task.id} initial={reduce ? false : { opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }} className="flex flex-wrap items-center gap-3 rounded-xl bg-bg/60 px-3 py-2.5 text-xs">
-                <CalendarClock className="size-4 text-violet" /><span className="min-w-40 flex-1 font-medium">{task.title}</span><span className="text-muted">{task.dueDate} · {task.owner}</span><Badge tone={task.complete ? 'ok' : 'warn'}>{task.complete ? 'Complete' : 'Open'}</Badge></motion.li>
-            ))}</ul>
-          </motion.div>
-        </section>
-
-        {/* ADVISOR UPDATES */}
-        <AnimatePresence>
-          {activity.length > 0 && (
-            <motion.section id="client-advisor-updates" key="updates" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="scroll-mt-24 overflow-hidden rounded-3xl border border-white bg-white/80 shadow-sm backdrop-blur">
-              <div className="flex items-center gap-2 border-b border-ink/5 px-3 py-4 sm:px-5"><MessageSquareText className="size-4 shrink-0 text-violet" /><div className="min-w-0"><h2 className="font-semibold">{t3(lang, 'Advisor updates', 'Neuigkeiten Ihrer Beratung', 'تحديثات المستشار')}</h2><p className="text-xs text-muted">Demo notifications for this client account only</p></div></div>
-              <ul className="divide-y divide-ink/5">{activity.map((item) => (
-                <li key={item.id} className="flex flex-wrap items-start gap-3 px-3 py-4 sm:px-5">
-                  <span className={`mt-1 grid size-8 place-items-center rounded-lg ${item.status === 'approved' ? 'bg-ok/10 text-ok' : 'bg-warn/10 text-warn'}`}>{item.status === 'approved' ? <CheckCircle2 className="size-4" /> : <CircleAlert className="size-4" />}</span>
-                  <div className="min-w-48 flex-1"><p className="text-sm font-medium">{item.status === 'approved' ? 'Document approved' : item.status === 'rejected' || item.status === 'password_required' ? 'Replacement requested' : item.status === 'needs_information' ? 'More information requested' : 'Action required'} · {item.name}</p>
-                    <p className="mt-1 text-xs text-muted">{item.clientRequest?.reason ?? item.reviewHistory?.at(-1)?.details ?? item.note} · {new Date(item.clientRequest?.createdAt ?? item.reviewHistory?.at(-1)?.at ?? item.createdAt).toLocaleString()}</p>
-                    {item.clientRequest && !item.clientRequest.resolvedAt && <div className="mt-3 flex flex-wrap gap-2">
-                      <input value={responses[item.id] ?? ''} onChange={(e) => setResponses((c) => ({ ...c, [item.id]: e.target.value }))} placeholder="Write a response for your advisor" aria-label={`Response for ${item.name}`} className="h-9 min-w-52 flex-1 rounded-full border border-ink/10 bg-white px-4 text-xs" />
-                      <Button size="sm" className="rounded-full" disabled={!responses[item.id]?.trim()} onClick={() => { respondToRequest(item.id, responses[item.id].trim()); setResponses((c) => ({ ...c, [item.id]: '' })); }}>Send response</Button>
-                      <Button size="sm" className="rounded-full" onClick={() => selectReplacement(item)}>Upload replacement</Button></div>}
-                    {item.clientRequest?.response && <p className="mt-2 text-xs text-violet">Your response: {item.clientRequest.response}</p>}
-                  </div>
-                  <Badge tone={item.status === 'approved' ? 'ok' : 'warn'}>{item.status === 'approved' ? 'Approved' : item.status.replace(/_/g, ' ')}</Badge>
-                </li>))}</ul>
-            </motion.section>
-          )}
-        </AnimatePresence>
-
-        {/* UPLOAD */}
-        <section id="client-upload" className="grid scroll-mt-24 gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(280px,1fr)]" aria-label="Upload">
-          <motion.div {...rise(1)} onDrop={handleDrop} onDragOver={(e) => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)}
-            className={`relative overflow-hidden rounded-3xl border-2 border-dashed p-4 text-center backdrop-blur transition-colors sm:p-9 ${dragOver ? 'border-violet bg-violet/10' : 'border-violet/30 bg-white/70'}`}>
-            <motion.span className="mx-auto grid size-14 place-items-center rounded-2xl bg-gradient-to-br from-violet to-blue text-white shadow-lg shadow-violet/30" animate={reduce ? undefined : { y: dragOver ? -8 : [0, -6, 0] }} transition={{ duration: 3, repeat: Infinity }}><FileUp className="size-7" /></motion.span>
-            <h2 className="mt-4 text-lg font-semibold">{t3(lang, 'Drop your documents here', 'Dokumente hier ablegen', 'أسقط مستنداتك هنا')}</h2>
-            <p className="mt-1 text-sm text-muted">{t3(lang, 'or choose multiple files from your device', 'oder mehrere Dateien auswählen', 'أو اختر عدة ملفات من جهازك')}</p>
-            <div className="mx-auto mt-4 max-w-sm text-start">
-              <label id="client-document-category-label" className="text-xs font-medium">Document type (optional)</label>
-              <div ref={categoryMenuRef} className="relative mt-1">
-                <button ref={categoryTriggerRef} id="client-document-category" type="button" aria-labelledby="client-document-category-label"
-                  aria-haspopup="listbox" aria-expanded={categoryMenuOpen} onClick={() => setCategoryMenuOpen((open) => !open)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      setCategoryMenuOpen(true);
-                    }
-                  }}
-                  className="flex h-10 w-full items-center justify-between rounded-xl border border-ink/10 bg-white px-4 text-start text-sm shadow-sm transition-colors hover:border-violet/35 focus-visible:outline-violet">
-                  <span>{categoryLabel(category)}</span>
-                  <ChevronDown className={`size-4 text-muted transition-transform ${categoryMenuOpen ? 'rotate-180' : ''}`} />
-                </button>
-                <AnimatePresence>
-                  {categoryMenuOpen && <motion.div role="listbox" aria-labelledby="client-document-category-label"
-                    initial={reduce ? false : { opacity: 0, y: -4, scale: 0.99 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -4, scale: 0.99 }}
-                    transition={{ duration: 0.14 }} className="absolute inset-x-0 top-full z-30 mt-2 max-h-72 overflow-y-auto rounded-2xl border border-ink/10 bg-white p-2 text-start shadow-[0_18px_48px_-18px_rgba(31,28,55,.35)]">
-                    {CATEGORY_GROUPS.map((group) => <div key={group.label} className="py-1">
-                      <p className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[.12em] text-muted">{group.label}</p>
-                      {group.categories.map((item) => <button key={item} type="button" role="option" aria-selected={category === item}
-                        onClick={() => { setCategory(item); setCategoryMenuOpen(false); categoryTriggerRef.current?.focus(); }}
-                        className={`flex min-h-9 w-full items-center justify-between rounded-lg px-3 text-sm transition-colors ${category === item ? 'bg-violet/10 font-medium text-violet' : 'text-ink hover:bg-violet/5'}`}>
-                        <span>{categoryLabel(item)}</span>{category === item && <CheckCircle2 className="size-4" />}
-                      </button>)}
-                    </div>)}
-                  </motion.div>}
-                </AnimatePresence>
-              </div>
-              <p className="mt-1.5 text-[10px] text-muted">{category === 'other' ? 'We will suggest a type from the file name.' : `New files will be labeled ${categoryLabel(category)}.`}</p>
+        {passwordDialog && <div className="fixed inset-0 z-[90] grid place-items-center bg-ink/45 p-4">
+          <form role="dialog" aria-modal="true" aria-labelledby="pdf-password-heading" className="w-full max-w-md rounded-3xl bg-white p-5 shadow-2xl sm:p-6"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const { resolve } = passwordDialog;
+              setPasswordDialog(null);
+              resolve(passwordDraft);
+              setPasswordDraft('');
+            }}>
+            <h2 id="pdf-password-heading" className="text-lg font-semibold text-ink">Unlock this PDF</h2>
+            <p className="mt-1 text-sm text-muted">{passwordDialog.fileName} is password-protected. The password is used only for this local processing attempt and is not saved.</p>
+            <label htmlFor="pdf-password-input" className="mt-4 block text-xs font-medium text-ink">PDF password</label>
+            <input id="pdf-password-input" type="password" autoComplete="off" autoFocus value={passwordDraft}
+              onChange={(event) => setPasswordDraft(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-ink/10 bg-white px-3 text-sm text-ink" />
+            <div className="mt-5 flex justify-end gap-2">
+              <Button type="button" variant="outline" className="min-h-11 rounded-full" onClick={() => {
+                const { resolve } = passwordDialog;
+                setPasswordDialog(null);
+                resolve(null);
+                setPasswordDraft('');
+              }}>Cancel</Button>
+              <Button type="submit" variant="primary" className="min-h-11 rounded-full" disabled={!passwordDraft}>Try password</Button>
             </div>
-            <Button className="mt-5 rounded-full px-6" variant="primary" icon={<Paperclip className="size-4" />} onClick={() => fileInput.current?.click()}>Choose files</Button>
-            <p className="mt-4 text-[11px] leading-5 text-muted">PDF, phone photos, scans and screenshots · up to {MAX_DEMO_FILE_BYTES / 1024 / 1024} MB each · PDFs up to {MAX_PDF_PAGES} pages</p>
-            {uploadError && <p role="alert" className="mt-3 text-xs text-bad">{uploadError}</p>}
-          </motion.div>
-          <motion.div {...rise(2)} className="rounded-3xl border border-white bg-white/80 p-4 shadow-sm backdrop-blur sm:p-5">
-            <p className="flex items-center gap-2 font-semibold"><ListChecks className="size-4 text-violet" />Processing in this demo</p>
-            <ol className="mt-4 space-y-2.5 text-xs text-muted">{PIPELINE.map(([, label], i) => <motion.li key={label} initial={reduce ? false : { opacity: 0, x: -8 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true }} transition={{ delay: i * 0.05 }} className="flex items-center gap-2"><span className="grid size-5 place-items-center rounded-full bg-violet/10 text-[10px] text-violet">{i + 1}</span>{label}</motion.li>)}</ol>
-            <div className="mt-4 rounded-xl border border-warn/20 bg-warn/5 p-3 text-[11px] leading-5 text-muted">PDF selectable text is extracted locally with simple label matching. Image/Arabic OCR, advanced AI, password decryption, and server upload are not configured. Use fictional samples only.</div>
-          </motion.div>
-        </section>
+          </form>
+        </div>}
 
-        {/* DOCUMENTS */}
-        <section id="client-documents" className="scroll-mt-24 overflow-hidden rounded-3xl border border-white bg-white/80 shadow-sm backdrop-blur" aria-label="Your documents">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-ink/5 px-3 py-4 sm:px-5">
-            <div><h2 className="font-semibold">{t3(lang, 'Your documents', 'Ihre Dokumente', 'مستنداتك')}</h2><p className="mt-1 text-xs text-muted">Files and metadata are held in memory for this browser demo only.</p></div>
-            <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Filter documents">{(['all', 'processing', 'attention', 'approved'] as const).map((f) => (
-              <button key={f} role="tab" aria-selected={filter === f} onClick={() => setFilter(f)} className={`rounded-full px-3 py-1.5 text-[11px] font-medium transition-colors ${filter === f ? 'bg-violet text-white shadow-md shadow-violet/30' : 'bg-ink/5 text-muted hover:text-ink'}`}>{{ all: 'All', processing: 'In review', attention: 'Needs you', approved: 'Approved' }[f]}</button>))}</div>
-          </div>
-          {visibleDocs.length === 0
-            ? <div className="px-5 py-14 text-center"><FileText className="mx-auto size-8 text-muted" /><p className="mt-3 text-sm font-medium">{documents.length ? 'No documents in this view' : 'No documents added yet'}</p><p className="mt-1 text-xs text-muted">Choose fictional sample files to preview the processing workflow.</p></div>
-            : <ul key={filter} className="divide-y divide-ink/5"><AnimatePresence initial={false}>{visibleDocs.map((item) => {
-              const active = expandedId === item.id;
-              const stageIndex = Math.max(0, PIPELINE.findIndex(([s]) => s === item.workflowStage));
-              return (
-                <motion.li key={item.id} layout initial={reduce ? false : { opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} id={`client-demo-document-${item.id}`} className="px-5 py-4">
-                  <button type="button" aria-expanded={active} onClick={() => setExpandedId(active ? null : item.id)} className="flex w-full flex-wrap items-center gap-3 text-start">
-                    <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-violet/10 text-violet"><FileText className="size-4" /></span>
-                    <span className="min-w-40 flex-1"><span className="block truncate text-sm font-medium">{item.name}</span><span className="mt-0.5 block text-[11px] text-muted">{categoryLabel(item.category)} · {formatBytes(item.sizeBytes)}{item.pageCount ? ` · ${item.pageCount} pages` : ''}</span></span>
-                    {item.status === 'processing' && <span className="w-28"><ProgressBar value={item.processingProgress ?? 0} active /></span>}
-                    <Badge tone={item.status === 'approved' ? 'ok' : item.status === 'review' ? 'warn' : item.status === 'processing' ? 'cyan' : 'bad'}>{item.status === 'review' ? 'Staff review' : item.status === 'needs_information' ? 'Needs information' : item.status.replace(/_/g, ' ')}</Badge>
-                    <span className="text-xs text-muted num">{Math.round(item.confidence * 100)}%</span>
-                    <ChevronDown className={`size-4 text-muted transition-transform ${active ? 'rotate-180' : ''}`} />
-                  </button>
-                  <AnimatePresence initial={false}>{active && (
-                    <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.3 }} className="overflow-hidden">
-                      <div className="mt-4 space-y-4 rounded-2xl border border-ink/5 bg-bg/50 p-4">
-                        <div><div className="mb-2 flex items-center justify-between text-[11px]"><span className="font-medium">Workflow pipeline</span><span className="text-muted">{item.workflowStage?.replace(/_/g, ' ') ?? 'received'}</span></div><ProgressBar value={item.processingProgress ?? (item.status === 'approved' ? 100 : 95)} active={item.status === 'processing'} />
-                          <ol className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{PIPELINE.map(([stage, label], index) => <li key={stage} className={`rounded-lg border px-2.5 py-2 text-[10px] ${index <= stageIndex ? 'border-violet/20 bg-violet/5 text-ink' : 'border-ink/5 text-muted'}`}><span className="me-1 text-violet">{index < stageIndex || item.status === 'approved' ? '✓' : index === stageIndex ? '•' : '○'}</span>{label}</li>)}</ol></div>
-                        <div className="grid gap-3 text-xs sm:grid-cols-3"><p><span className="text-muted">Language:</span> {item.detectedLanguage ?? 'Not detected'}</p><p><span className="text-muted">Pages:</span> {item.pageCount ?? (item.name.toLowerCase().endsWith('.pdf') ? 'Checking / unknown' : 'Not applicable')}</p><p><span className="text-muted">Analysis:</span> local text rules only; no AI model used</p></div>
-                        {Object.entries(item.fields).some(([, v]) => Boolean(v)) && <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{Object.entries(item.fields).filter(([, v]) => Boolean(v)).map(([k, v]) => <p key={k} className="rounded-lg bg-white p-2 text-[11px] shadow-sm"><span className="block text-muted">{k.replace(/([A-Z])/g, ' $1')}</span><span className="font-medium">{v}</span></p>)}</div>}
-                        {item.extractedDetails && Object.entries(item.extractedDetails).map(([k, v]) => <p key={k} className="whitespace-pre-line rounded-lg bg-white p-2 text-[11px] shadow-sm"><span className="font-medium text-muted">{k}: </span>{v}</p>)}
-                        {item.validationWarnings?.length ? <div className="rounded-xl border border-warn/20 bg-warn/5 p-3 text-[11px]"><p className="font-semibold text-warn">Manual review / validation warnings</p><ul className="mt-1 list-inside list-disc text-muted">{item.validationWarnings.map((w) => <li key={w}>{w}</li>)}</ul></div> : null}
-                        {item.note && <p className="text-[11px] text-muted">{item.note}</p>}
-                        {item.reviewHistory?.length ? <details><summary className="cursor-pointer text-[11px] text-violet">Review history</summary><ul className="mt-2 space-y-1 text-[10px] text-muted">{item.reviewHistory.map((e, i) => <li key={`${e.at}-${i}`}>{new Date(e.at).toLocaleString()} · {e.action}: {e.details}</li>)}</ul></details> : null}
-                      </div>
-                    </motion.div>)}</AnimatePresence>
-                </motion.li>);
-            })}</AnimatePresence></ul>}
-        </section>
-        <footer className="flex flex-wrap items-center justify-between gap-2 pt-2 text-[11px] text-muted"><span><LockKeyhole className="me-1 inline size-3" />Demo files are not saved to a server</span><span>Use fictional sample documents only.</span></footer>
+        {finishDialogOpen && activePeriod && <div className="fixed inset-0 z-[80] grid place-items-center bg-ink/45 p-4" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setFinishDialogOpen(false);
+        }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="finish-month-heading" className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-3xl bg-white p-5 shadow-2xl sm:p-6">
+            <h2 id="finish-month-heading" className="text-lg font-semibold text-ink">Submit this month to FinTax?</h2>
+            <p className="mt-1 text-sm text-muted">You will not be able to edit uploads after submission unless staff request changes.</p>
+            <div className="mt-4 rounded-xl bg-bg/70 p-3 text-xs">
+              <p className="font-semibold text-ink">Documents by folder</p>
+              {Object.entries(activePeriodDocuments.reduce<Record<string, number>>((summary, document) => {
+                const folder = document.folder ?? '01_FiBu';
+                summary[folder] = (summary[folder] ?? 0) + 1;
+                return summary;
+              }, {})).map(([folder, count]) => <p key={folder} className="mt-1 text-muted">{folder}: {count}</p>)}
+              {activePeriodDocuments.length === 0 && <p className="mt-1 text-muted">No documents currently attached.</p>}
+              <p className="mt-3 font-semibold text-ink">Not applicable reasons</p>
+              {activePeriod.checklist.filter((item) => item.state === 'not_applicable').map((item) => <p key={item.key} className="mt-1 text-muted">{item.label}: {item.naReason}</p>)}
+              {activePeriodDocuments.some((document) => document.validationWarnings?.length) && <p className="mt-3 text-warn">Some documents have warnings and may need staff review.</p>}
+            </div>
+            {finishError && <p role="alert" className="mt-3 text-xs text-bad">{finishError}</p>}
+            <label className="mt-4 flex items-start gap-2 text-xs text-ink">
+              <input type="checkbox" checked={finishConfirmed} onChange={(event) => setFinishConfirmed(event.target.checked)} className="mt-0.5 size-4 accent-violet" />
+              <span>I confirm all documents for {new Date(activePeriod.year, activePeriod.month - 1, 1).toLocaleDateString('en', { month: 'long', year: 'numeric' })} are uploaded.</span>
+            </label>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="outline" className="min-h-11 rounded-full" onClick={() => setFinishDialogOpen(false)}>Cancel</Button>
+              <Button variant="primary" className="min-h-11 rounded-full" disabled={!finishConfirmed} onClick={() => {
+                const result = submitPeriod(activePeriod.id, activeClientEmail, activeClientEmail);
+                if (!result.ok) {
+                  setFinishError(result.blockers.join(' '));
+                  return;
+                }
+                setFinishDialogOpen(false);
+                setNotice('Month submitted to the FinTax review queue.');
+              }}>Confirm submission</Button>
+            </div>
+          </section>
+        </div>}
+
+        {clientPage === 'upload' && <ClientDocumentUploadPage
+          activePeriodDocuments={activePeriodDocuments}
+          category={category}
+          lang={lang}
+          reduceMotion={reduce}
+          dragOver={dragOver}
+          uploadError={uploadError}
+          fileInput={fileInput}
+          cameraInput={cameraInput}
+          onCategoryChange={setCategory}
+          onDrop={handleDrop}
+          onDragOver={() => setDragOver(true)}
+          onDragLeave={() => setDragOver(false)}
+          onCancelUpload={cancelUpload}
+        />}
+        <input ref={fileInput} id="client-document-upload" type="file" multiple className="sr-only" aria-label="Choose files to upload" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.tif,.tiff,.bmp,application/pdf,image/*" onChange={handleFiles} />
+        <input ref={cameraInput} id="client-camera-upload" type="file" className="sr-only" aria-label="Scan a document with your camera" accept="image/*" capture="environment" onChange={handleFiles} />
+
+        {clientPage === 'documents' && <ClientDocumentHistoryPage
+          documents={documents}
+          visibleDocuments={visibleDocs}
+          documentFolders={documentFolders}
+          filter={filter}
+          documentSearch={documentSearch}
+          folderFilter={folderFilter}
+          expandedId={expandedId}
+          lang={lang}
+          reduceMotion={reduce}
+          onFilterChange={setFilter}
+          onDocumentSearchChange={setDocumentSearch}
+          onFolderFilterChange={setFolderFilter}
+          onExpandedIdChange={setExpandedId}
+        />}
+                <footer className="flex flex-wrap items-center justify-between gap-2 pt-2 text-[11px] text-muted"><span><LockKeyhole className="me-1 inline size-3" />Demo files are not saved to a server</span><span>Use fictional sample documents only.</span></footer>
         <nav aria-label="Client page navigation" className="client-bottom-nav mx-auto w-full max-w-md md:hidden">
           <ul className="workspace-bottom-dock grid grid-cols-5">
             {[
