@@ -21,6 +21,7 @@ export function documentsVisibleTo(
   actorId: string,
 ): DemoDocument[] {
   return documents.filter((document) => {
+    if (role !== 'client' && document.clientSaved === false) return false;
     if (!document.clientId) return role !== 'client';
     const client = demoClientById(document.clientId);
     return client ? canAccessClientData(role, actorId, client) : role === 'admin';

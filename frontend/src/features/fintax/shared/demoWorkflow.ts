@@ -45,6 +45,7 @@ export interface DemoDocument {
   confidence: number;
   fields: DemoFields;
   sample: boolean;
+  clientSaved?: boolean;
   clientId?: string;
   paymentStatus?: 'paid' | 'unpaid' | 'unknown';
   currency?: string;
@@ -78,10 +79,11 @@ export function canTransitionDocumentStatus(from: DemoDocument['status'], to: De
   return from === to || DOCUMENT_STATUS_TRANSITIONS[from].includes(to);
 }
 
-const acceptedExtensions = new Set(['pdf', 'jpg', 'jpeg', 'png', 'webp', 'heic', 'tif', 'tiff', 'bmp']);
+const acceptedExtensions = new Set(['pdf', 'jpg', 'jpeg', 'png', 'webp', 'heic', 'tif', 'tiff', 'bmp', 'xlsx', 'csv', 'txt', 'docx']);
 const acceptedTypes = new Set([
   'application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/heic',
-  'image/tiff', 'image/bmp',
+  'image/tiff', 'image/bmp', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/csv', 'text/plain', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 ]);
 export const MAX_DEMO_FILE_BYTES = 50 * 1024 * 1024;
 
@@ -91,7 +93,7 @@ export function validateDemoFile(file: Pick<File, 'name' | 'size' | 'type'>): st
   const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
   const supportedType = acceptedTypes.has(file.type.toLowerCase());
   if (!acceptedExtensions.has(extension) && !supportedType) {
-    return 'Choose a PDF or a common photo/scan format (JPEG, PNG, WebP, HEIC, TIFF, or BMP).';
+    return 'Choose a PDF, common photo/scan (JPEG, PNG, WebP, HEIC, TIFF, BMP), XLSX, CSV, TXT, or DOCX file.';
   }
   return null;
 }

@@ -72,6 +72,10 @@ export interface FinTaxDocument {
   category: string;
   page_count: number | null;
   status: 'received' | 'password_required' | 'duplicate';
+  extracted_text: string;
+  extraction_note: string;
+  ocr_languages: string;
+  ocr_confidence: number | null;
   created_at: string;
 }
 

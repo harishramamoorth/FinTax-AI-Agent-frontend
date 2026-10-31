@@ -174,6 +174,30 @@ describe('shared demo document store', () => {
     expect(useDemoDocumentsStore.getState().periodAudit[0].action).toBe('month_finished');
   });
 
+  it('requires client extraction review to be saved before monthly submission', () => {
+    const period = createMonthlyPeriod('client@fintax.demo', 2026, 10);
+    const readyPeriod = {
+      ...period,
+      checklist: period.checklist.map((item) => ({ ...item, state: 'uploaded' as const })),
+      documentIds: ['CLIENT-TEST01'],
+    };
+    const upload = {
+      ...makeDocument(),
+      clientId: period.clientId,
+      periodId: period.id,
+      clientSaved: false,
+    };
+    useDemoDocumentsStore.setState({ periods: [readyPeriod], documents: [upload] });
+
+    expect(useDemoDocumentsStore.getState().submitPeriod(period.id, period.clientId, period.clientId)).toMatchObject({
+      ok: false,
+      blockers: ['Review and save every uploaded document before submitting the month.'],
+    });
+
+    useDemoDocumentsStore.getState().updateDocument(upload.id, { clientSaved: true }, period.clientId);
+    expect(useDemoDocumentsStore.getState().submitPeriod(period.id, period.clientId, period.clientId).ok).toBe(true);
+  });
+
   it('requires assigned staff and blocks approval while error findings remain', () => {
     const period = { ...createMonthlyPeriod('client@fintax.demo', 2026, 10, 'submitted'), submittedAt: '2026-10-22T09:00:00.000Z' };
     const analysis: MonthAnalysis = {

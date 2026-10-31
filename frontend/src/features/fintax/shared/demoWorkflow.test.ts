@@ -5,11 +5,15 @@ import {
 } from './demoWorkflow';
 
 describe('demo document workflow', () => {
-  it('accepts supported files up to the demo upload limit', () => {
+  it('accepts supported documents up to the demo upload limit', () => {
     expect(validateDemoFile({ name: 'scan.pdf', size: 1024, type: 'application/pdf' })).toBeNull();
     expect(validateDemoFile({ name: 'receipt.heic', size: 1024, type: 'image/heic' })).toBeNull();
+    expect(validateDemoFile({ name: 'ledger.xlsx', size: 1024, type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })).toBeNull();
+    expect(validateDemoFile({ name: 'notes.csv', size: 1024, type: 'text/csv' })).toBeNull();
+    expect(validateDemoFile({ name: 'letter.docx', size: 1024, type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })).toBeNull();
+    expect(validateDemoFile({ name: 'memo.txt', size: 1024, type: 'text/plain' })).toBeNull();
     expect(validateDemoFile({ name: 'large.pdf', size: 50 * 1024 * 1024 + 1, type: 'application/pdf' })).toContain('50 MB');
-    expect(validateDemoFile({ name: 'notes.txt', size: 1024, type: 'text/plain' })).toContain('Choose a PDF');
+    expect(validateDemoFile({ name: 'script.exe', size: 1024, type: 'application/octet-stream' })).toContain('Choose a PDF');
   });
 
   it('classifies common English and German document filenames', () => {

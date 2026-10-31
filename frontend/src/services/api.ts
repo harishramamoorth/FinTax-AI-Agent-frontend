@@ -53,11 +53,22 @@ export const api = {
   disableAccount: (userId: string) => request<{ id: string; enabled: boolean }>('PATCH', `/accounts/${encodeURIComponent(userId)}/disable`),
   auditEvents: () => get<Array<{ id: number; action: string; user_id: string | null; client_id: string | null; target_id: string | null; created_at: string }>>('/audit'),
   documents: () => get<import('@/types/api').FinTaxDocument[]>('/documents'),
-  uploadDocument: async (file: File, category: string, clientId?: string) => {
+  uploadDocument: async (
+    file: File,
+    category: string,
+    clientId?: string,
+    extraction?: { text: string; note: string; language: string; confidence: number | null },
+  ) => {
     const form = new FormData();
     form.append('file', file);
     form.append('category', category);
     if (clientId) form.append('client_id', clientId);
+    if (extraction) {
+      form.append('extracted_text', extraction.text);
+      form.append('extraction_note', extraction.note);
+      form.append('ocr_languages', extraction.language);
+      if (extraction.confidence !== null) form.append('ocr_confidence', String(extraction.confidence));
+    }
     let response: Response;
     try {
       response = await fetch('/api/documents', { method: 'POST', headers: authHeaders(), body: form });

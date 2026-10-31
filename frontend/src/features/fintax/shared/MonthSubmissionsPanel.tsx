@@ -138,6 +138,46 @@ export default function MonthSubmissionsPanel({ role, userName }: { role: Review
     setNotice(`${fileName} downloaded. Intended placement: 03_Agenda\\${selected.year}\\${month}; this is a placeholder, not a live Agenda export.`);
   };
 
+  const downloadMonthlyReport = () => {
+    if (!selected || !client || selected.status !== 'completed' || !analysis) return;
+    const report = [
+      'FINTAX MONTHLY REVIEW REPORT',
+      `Client: ${client.company}`,
+      `Period: ${new Date(selected.year, selected.month - 1, 1).toLocaleDateString('en', { month: 'long', year: 'numeric' })}`,
+      `Status: ${selected.status}`,
+      `Submitted: ${selected.submittedAt ? new Date(selected.submittedAt).toLocaleString() : 'Not recorded'}`,
+      `Completed: ${selected.completedAt ? new Date(selected.completedAt).toLocaleString() : 'Not recorded'}`,
+      `Prepared by: ${userName}`,
+      `Generated: ${new Date().toLocaleString()}`,
+      '',
+      `DOCUMENTS (${selectedDocuments.length})`,
+      ...selectedDocuments.map((document) => [
+        `- ${document.name} | ${document.category.replace(/_/g, ' ')} | ${document.status.replace(/_/g, ' ')}`,
+        `  Date: ${document.fields.documentDate || 'Not detected'} | Counterparty: ${document.fields.counterparty || 'Not detected'} | Reference: ${document.fields.reference || 'Not detected'}`,
+        `  Net: ${document.fields.netAmount || '—'} | VAT: ${document.fields.vatAmount || '—'} | Gross: ${document.fields.grossAmount || '—'} ${document.currency ?? client.currency}`,
+        ...(document.validationWarnings?.length ? [`  Review notes: ${document.validationWarnings.join('; ')}`] : []),
+      ].join('\n')),
+      '',
+      `MONTHLY FINDINGS (${analysis.findings.length})`,
+      ...(analysis.findings.length
+        ? analysis.findings.map((finding) => `- [${finding.severity.toUpperCase()}] ${finding.title}\n  Evidence: ${finding.evidence}\n  Recommendation: ${finding.recommendedSolution}`)
+        : ['No findings from the current deterministic checks.']),
+      '',
+      'This report is generated from the browser-only demo workspace. Verify all values against original documents.',
+    ].join('\n');
+    const month = String(selected.month).padStart(2, '0');
+    const blob = new Blob([report], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `FinTax-monthly-report-${selected.year}-${month}.txt`;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setNotice('Completed monthly review report downloaded.');
+  };
+
   return <div id="month-submissions" className="space-y-5">
     {role === 'admin' && <PortfolioOverview periods={periods} documents={documents} />}
     <div className="grid gap-5 xl:grid-cols-[minmax(260px,.75fr)_minmax(0,1.5fr)]">
@@ -220,6 +260,10 @@ export default function MonthSubmissionsPanel({ role, userName }: { role: Review
           <Button variant="primary" className="min-h-10 rounded-full" onClick={approve} disabled={!['submitted', 'in_review'].includes(selected.status) || errors.length > 0}>Approve month</Button>
         </div>
         {errors.length > 0 && <p className="mt-2 text-right text-xs text-bad">Approval blocked: resolve {errors.length} error-level finding{errors.length === 1 ? '' : 's'} first.</p>}
+      </Panel>}
+      {selected.status === 'completed' && <Panel className="flex flex-wrap items-center justify-between gap-3 p-4">
+        <div><h3 className="text-sm font-semibold">Completed monthly report</h3><p className="mt-1 text-xs text-muted">Available to staff and admin after the monthly review is completed.</p></div>
+        <Button variant="primary" className="min-h-10 rounded-full" onClick={downloadMonthlyReport}>Download monthly report</Button>
       </Panel>}
       {!readOnly && selected.status === 'completed' && <Panel className="flex flex-wrap items-center justify-between gap-3 p-4">
         <div><h3 className="text-sm font-semibold">Accounting export</h3><p className="mt-1 text-xs text-muted">Placeholder download for the intended 03_Agenda folder. No Agenda integration is connected.</p></div>

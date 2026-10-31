@@ -524,7 +524,7 @@ export default function TeamWorkspace({ role, userName, onSignOut }: { role: Dem
         onSignOut={onSignOut}
       />
       <BottomBar screen={screen} onSelect={navigateTo} reviewCount={reviewDocuments.length} onMore={() => setDrawerOpen(true)} />
-      <input ref={fileInput} type="file" multiple className="sr-only" aria-label="Choose documents to upload" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.tif,.tiff,.bmp,application/pdf,image/*" onChange={handleFileChange} />
+      <input ref={fileInput} type="file" multiple className="sr-only" aria-label="Choose documents to upload" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.tif,.tiff,.bmp,.xlsx,.csv,.txt,.docx,application/pdf,image/*,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={handleFileChange} />
     </div>
   );
 }

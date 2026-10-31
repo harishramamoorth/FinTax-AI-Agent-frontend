@@ -207,6 +207,7 @@ export const useDemoDocumentsStore = create<DemoDocumentsState>((set, get) => ({
     const blockers = checklistBlockers(period.checklist).map((item) => `${item.label} is still required.`);
     const periodDocuments = state.documents.filter((document) => period.documentIds.includes(document.id));
     if (periodDocuments.some((document) => document.status === 'processing')) blockers.push('Wait for all documents to finish processing.');
+    if (periodDocuments.some((document) => document.clientSaved === false)) blockers.push('Review and save every uploaded document before submitting the month.');
     if (periodDocuments.some((document) => document.status === 'password_required' || document.status === 'action_required')) blockers.push('Resolve document processing failures before submitting.');
     if (!isChecklistComplete(period.checklist) && blockers.length === 0) blockers.push('Complete the required monthly checklist.');
     if (period.status !== 'open' && period.status !== 'changes_requested') blockers.push('This month is not open for submission.');

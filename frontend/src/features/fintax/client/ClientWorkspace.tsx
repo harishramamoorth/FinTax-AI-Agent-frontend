@@ -88,6 +88,7 @@ export default function ClientWorkspace({ clientEmail, onSignOut }: { clientEmai
   const addDocument = useDemoDocumentsStore((state) => state.addDocument);
   const updateDocument = useDemoDocumentsStore((state) => state.updateDocument);
   const periods = useDemoDocumentsStore((state) => state.periods);
+  const storageHydrated = useDemoDocumentsStore((state) => state.storageHydrated);
   const setChecklistItem = useDemoDocumentsStore((state) => state.setChecklistItem);
   const submitPeriod = useDemoDocumentsStore((state) => state.submitPeriod);
   const storageError = useDemoDocumentsStore((state) => state.storageError);
@@ -112,12 +113,13 @@ export default function ClientWorkspace({ clientEmail, onSignOut }: { clientEmai
   const periodReadOnly = activePeriod?.status === 'submitted' || activePeriod?.status === 'in_review' || activePeriod?.status === 'completed';
   const canFinishPeriod = Boolean(activePeriod
     && isChecklistComplete(activePeriod.checklist)
-    && !activePeriodDocuments.some((document) => document.status === 'processing' || document.status === 'action_required' || document.status === 'password_required')
+    && !activePeriodDocuments.some((document) => document.status === 'processing' || document.status === 'action_required' || document.status === 'password_required' || document.clientSaved === false)
     && !periodReadOnly);
   const finishBlockers = activePeriod ? [
     ...checklistBlockers(activePeriod.checklist).map((item) => `${item.label} is still required.`),
     ...(activePeriodDocuments.some((document) => document.status === 'processing') ? ['Wait for document processing to finish.'] : []),
     ...(activePeriodDocuments.some((document) => document.status === 'action_required' || document.status === 'password_required') ? ['Resolve document processing failures.'] : []),
+    ...(activePeriodDocuments.some((document) => document.clientSaved === false && document.extractedText !== undefined) ? ['Review and save each extracted document before submitting the month.'] : []),
   ] : ['No monthly period is available for this client.'];
   const clientQuestions = assistantQuestions.filter((question) => question.clientId === activeClientEmail);
   const [lang, setLang] = useState<AssistantLanguage>(() => {
@@ -308,12 +310,21 @@ export default function ClientWorkspace({ clientEmail, onSignOut }: { clientEmai
 
   const processFiles = async (files: FileList | File[]) => {
     setUploadError(''); setNotice('');
+    if (!useDemoDocumentsStore.getState().storageHydrated) {
+      setUploadError('Browser storage is still preparing. Wait a moment, then try the upload again.');
+      return;
+    }
+    if (useDemoDocumentsStore.getState().storageError) {
+      setUploadError(`Browser storage is unavailable. Fix the storage issue before uploading: ${useDemoDocumentsStore.getState().storageError}`);
+      return;
+    }
     if (!activePeriod || periodReadOnly) {
       setUploadError('This month is read-only. Select an open month before uploading documents.');
       return;
     }
     const accepted: DemoDocument[] = [];
     const rejected: string[] = [];
+    const processingErrors: string[] = [];
     const targetReplacement = replacementFor.current;
     for (const file of Array.from(files)) {
       const issue = validateDemoFile(file);
@@ -324,7 +335,7 @@ export default function ClientWorkspace({ clientEmail, onSignOut }: { clientEmai
         id, name: file.name, category: selectedCategory, periodId: activePeriod.id,
         folder: folderPathForCategory(selectedCategory, activePeriod.year, activePeriod.month), mime: file.type,
         sizeBytes: file.size, createdAt: new Date().toISOString(), status: 'processing', confidence: 0,
-        fields: emptyDemoFields(), sample: false, clientId: activeClientEmail, currency: activeClient.currency, workflowStage: 'received', detectedLanguage: 'Detecting locally',
+        fields: emptyDemoFields(), sample: false, clientSaved: false, clientId: activeClientEmail, currency: activeClient.currency, workflowStage: 'received', detectedLanguage: 'Detecting locally',
         validationWarnings: [], reviewHistory: [{ at: new Date().toISOString(), action: 'Received', details: 'Added in the browser-only demo session.' }],
         file, processingProgress: 0, note: 'The original is being saved to this browser’s IndexedDB.', replacementFor: targetReplacement,
       };
@@ -338,6 +349,10 @@ export default function ClientWorkspace({ clientEmail, onSignOut }: { clientEmai
       addDocument(doc); accepted.push(doc);
     }
     replacementFor.current = undefined;
+    if (accepted.length) {
+      setActiveBottomSection('client-upload');
+      navigate('/demo/client/upload');
+    }
     const cancelledNames: string[] = [];
     for (const doc of accepted) {
       if (cancelledUploadIds.current.delete(doc.id)) {
@@ -414,10 +429,9 @@ export default function ClientWorkspace({ clientEmail, onSignOut }: { clientEmai
           pageCount: extraction.pageCount ?? undefined,
           detectedLanguage,
           validationWarnings: warnings,
-          workflowStage: 'staff_review',
-          status: 'review',
+          workflowStage: 'checks',
           processingProgress: 100,
-          note: extraction.note,
+          note: `${extraction.note} Review the extracted text and fields, then save to share with your FinTax team.`,
         });
       } catch (error) {
         if (controller.signal.aborted) {
@@ -437,6 +451,7 @@ export default function ClientWorkspace({ clientEmail, onSignOut }: { clientEmai
         const reason = passwordRequired
           ? 'This PDF is password-protected or the password was incorrect. Please provide the correct password or upload an unlocked copy.'
           : message;
+        processingErrors.push(`${doc.name}: ${reason}`);
         updateDocument(doc.id, { status: passwordRequired ? 'password_required' : 'action_required', workflowStage: 'staff_review', validationWarnings: [reason], clientRequest: { reason, createdAt: new Date().toISOString() }, note: message });
       }
       uploadControllers.current.delete(doc.id);
@@ -446,9 +461,45 @@ export default function ClientWorkspace({ clientEmail, onSignOut }: { clientEmai
       setFilter('all');
       setNotice(cancelledNames.length
         ? `${cancelledNames.length} file${cancelledNames.length === 1 ? '' : 's'} canceled; remaining queued files finished processing.`
-        : `${accepted.length} file${accepted.length === 1 ? '' : 's'} added to the shared browser demo review queue.`);
+        : `${accepted.length} file${accepted.length === 1 ? '' : 's'} processed. Review the extracted text and save each document to share it with your team.`);
     }
-    if (rejected.length) setUploadError(rejected.join(' '));
+    if (rejected.length || processingErrors.length) setUploadError([...rejected, ...processingErrors].join(' '));
+  };
+
+  const saveExtractionDraft = (document: DemoDocument, extractedText: string, fields: DemoDocument['fields']) => {
+    const currentStorageError = useDemoDocumentsStore.getState().storageError;
+    if (!useDemoDocumentsStore.getState().storageHydrated || currentStorageError) {
+      setUploadError(currentStorageError || 'Browser storage is still preparing. Wait a moment before saving.');
+      return;
+    }
+    const detectedCategory = document.category === 'other' ? categoryForFilename(document.name, extractedText) : document.category;
+    const updatedDocument: DemoDocument = {
+      ...document,
+      category: detectedCategory,
+      fields,
+      extractedText,
+      extractedDetails: extractDocumentDetails(detectedCategory, extractedText),
+      workflowStage: 'staff_review',
+      status: 'review',
+      clientSaved: true,
+      processingProgress: 100,
+      note: 'Client reviewed and saved the extracted text and fields for FinTax team review.',
+    };
+    updateDocument(document.id, {
+      category: detectedCategory,
+      folder: folderPathForCategory(detectedCategory, activePeriod?.year ?? new Date().getFullYear(), activePeriod?.month ?? new Date().getMonth() + 1),
+      fields,
+      extractedText,
+      extractedDetails: updatedDocument.extractedDetails,
+      validationWarnings: validationWarnings(updatedDocument),
+      detectedLanguage: detectDocumentLanguage(extractedText),
+      workflowStage: 'staff_review',
+      status: 'review',
+      clientSaved: true,
+      processingProgress: 100,
+      note: updatedDocument.note,
+    }, activeClientEmail);
+    setNotice(`${document.name} saved and shared with your FinTax team.`);
   };
 
   const handleFiles = (e: ChangeEvent<HTMLInputElement>) => { if (e.target.files) void processFiles(e.target.files); e.target.value = ''; };
@@ -745,11 +796,15 @@ export default function ClientWorkspace({ clientEmail, onSignOut }: { clientEmai
 
         {clientPage === 'upload' && <ClientDocumentUploadPage
           activePeriodDocuments={activePeriodDocuments}
+          pendingDocuments={activePeriodDocuments.filter((document) => document.clientSaved === false && document.extractedText !== undefined)}
+          storageReady={storageHydrated && !storageError}
+          storageError={storageError}
           category={category}
           lang={lang}
           reduceMotion={reduce}
           dragOver={dragOver}
           uploadError={uploadError}
+          notice={notice}
           fileInput={fileInput}
           cameraInput={cameraInput}
           onCategoryChange={setCategory}
@@ -757,8 +812,9 @@ export default function ClientWorkspace({ clientEmail, onSignOut }: { clientEmai
           onDragOver={() => setDragOver(true)}
           onDragLeave={() => setDragOver(false)}
           onCancelUpload={cancelUpload}
+          onSaveDraft={saveExtractionDraft}
         />}
-        <input ref={fileInput} id="client-document-upload" type="file" multiple className="sr-only" aria-label="Choose files to upload" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.tif,.tiff,.bmp,application/pdf,image/*" onChange={handleFiles} />
+        <input ref={fileInput} id="client-document-upload" type="file" multiple className="sr-only" aria-label="Choose files to upload" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.tif,.tiff,.bmp,.xlsx,.csv,.txt,.docx,application/pdf,image/*,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={handleFiles} />
         <input ref={cameraInput} id="client-camera-upload" type="file" className="sr-only" aria-label="Scan a document with your camera" accept="image/*" capture="environment" onChange={handleFiles} />
 
         {clientPage === 'documents' && <ClientDocumentHistoryPage

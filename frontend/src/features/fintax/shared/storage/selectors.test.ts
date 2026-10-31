@@ -12,6 +12,14 @@ describe('role-aware demo selectors', () => {
     expect(documentsVisibleTo(CLIENT_DEMO_DOCUMENTS, 'admin', 'Admin Demo User')).toHaveLength(CLIENT_DEMO_DOCUMENTS.length);
   });
 
+  it('keeps client uploads private until the client saves the extracted review', () => {
+    const upload = { ...CLIENT_DEMO_DOCUMENTS[0], clientSaved: false };
+    expect(documentsVisibleTo([upload], 'client', 'client@fintax.demo')).toEqual([upload]);
+    expect(documentsVisibleTo([upload], 'staff', 'Lena M.')).toEqual([]);
+    expect(documentsVisibleTo([upload], 'admin', 'Admin Demo User')).toEqual([]);
+    expect(documentsVisibleTo([{ ...upload, clientSaved: true }], 'staff', 'Lena M.')).toHaveLength(1);
+  });
+
   it('applies the same client/staff/admin visibility to monthly periods', () => {
     const periods = [createMonthlyPeriod('client@fintax.demo', 2026, 10), createMonthlyPeriod('nordlicht@fintax.demo', 2026, 10)];
     expect(periodsVisibleTo(periods, 'client', 'client@fintax.demo')).toHaveLength(1);

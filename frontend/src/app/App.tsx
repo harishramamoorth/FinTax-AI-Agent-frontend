@@ -1,7 +1,12 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { ErrorBoundary } from './ErrorBoundary';
 import { Toaster } from '@/components/ui/overlays';
+import { AppShell } from '@/components/layout/AppShell';
+import FinTaxDashboard from '@/features/fintax/shared/FinTaxDashboard';
+import DocumentsPage from '@/features/fintax/shared/DocumentsPage';
+import ClientsPage from '@/features/fintax/shared/ClientsPage';
 import RoleLoginPage from '@/features/fintax/shared/RoleLoginPage';
 import ClientWorkspace from '@/features/fintax/client/ClientWorkspace';
 import AdminWorkspace from '@/features/fintax/admin/AdminWorkspace';
@@ -10,6 +15,9 @@ import HelpBot from '@/features/fintax/shared/HelpBot';
 import { DEMO_ACCOUNTS, type DemoRole } from '@/features/fintax/shared/demoAccounts';
 import { useUiStore } from '@/stores/uiStore';
 import { useDemoDocumentsStore } from '@/stores/demoDocumentsStore';
+import { api } from '@/services/api';
+
+const queryClient = new QueryClient();
 
 function ThemeSync() {
   const theme = useUiStore((state) => state.theme);
@@ -22,7 +30,7 @@ function ThemeSync() {
   return null;
 }
 
-function DemoApp() {
+function AppRoutes() {
   const [selectedRole, setSelectedRole] = useState<DemoRole | null>(null);
   const [navigationError, setNavigationError] = useState('');
   const navigate = useNavigate();
@@ -58,53 +66,67 @@ function DemoApp() {
     }
     setSelectedRole(null);
     setNavigationError('');
-    navigate('/', { replace: true });
+    navigate('/demo', { replace: true });
   };
 
   const routeError = (location.state as { error?: string } | null)?.error ?? navigationError;
   const resetRoleSelection = (role: DemoRole | null) => {
     setSelectedRole(role);
     setNavigationError('');
-    if (location.state) navigate('/', { replace: true, state: null });
+    if (location.state) navigate('/demo', { replace: true, state: null });
   };
 
   const helpRole: DemoRole = location.pathname.includes('/admin') ? 'admin' : location.pathname.includes('/staff') ? 'staff' : 'client';
+  const isDemoRoute = location.pathname.startsWith('/demo');
 
   return (
     <>
-    <Routes>
-      <Route path="/" element={
-        <RoleLoginPage
-          error={routeError}
-          onSelectRole={resetRoleSelection}
-          onContinue={continueAsDemoUser}
-        />
-      } />
-      <Route path="/login" element={<Navigate to="/" replace />} />
-      <Route path="/demo/:role/*" element={<RoleDashboard selectedRole={selectedRole} onSignOut={logout} />} />
-      <Route path="*" element={<Navigate to="/" replace state={{ error: 'That demo page was not found. Choose a demo role to continue.' }} />} />
-    </Routes>
-    <HelpBot role={helpRole} />
-    <Toaster />
+      <Routes>
+        <Route path={import.meta.env.DEV ? '/portal' : '/'} element={<AppShell />}>
+          <Route index element={<FinTaxDashboard />} />
+          <Route path="documents" element={<DocumentsPage />} />
+          <Route path="clients" element={<StaffClientsPage />} />
+          <Route path="*" element={<Navigate to={import.meta.env.DEV ? '/portal' : '/'} replace />} />
+        </Route>
+        {import.meta.env.DEV && <Route path="/" element={<Navigate to="/demo/client" replace />} />}
+        <Route path="/demo" element={
+          <RoleLoginPage
+            error={routeError}
+            onSelectRole={resetRoleSelection}
+            onContinue={continueAsDemoUser}
+          />
+        } />
+        <Route path="/demo/login" element={<Navigate to="/demo" replace />} />
+        <Route path="/demo/:role/*" element={<RoleDashboard selectedRole={selectedRole} onSignOut={logout} />} />
+        <Route path="/demo/*" element={<Navigate to="/demo" replace state={{ error: 'That demo page was not found. Choose a demo role to continue.' }} />} />
+      </Routes>
+      {isDemoRoute && <HelpBot role={helpRole} />}
+      {isDemoRoute && <Toaster />}
     </>
   );
+}
+
+function StaffClientsPage() {
+  const account = useQuery({ queryKey: ['fintax-user'], queryFn: api.me, staleTime: 30_000 });
+  if (account.data?.user.role === 'client') return <Navigate to="/" replace />;
+  return <ClientsPage />;
 }
 
 function RoleDashboard({ selectedRole, onSignOut }: { selectedRole: DemoRole | null; onSignOut: () => void }) {
   const { role } = useParams();
   const location = useLocation();
   const navigationRole = (location.state as { demoRole?: DemoRole } | null)?.demoRole;
-  const activeRole = selectedRole ?? navigationRole;
+  const activeRole = selectedRole ?? navigationRole ?? role;
   if (role !== 'admin' && role !== 'staff' && role !== 'client') {
-    return <Navigate to="/" replace state={{ error: 'That demo role is not available. Choose Admin, Staff, or Client.' }} />;
+    return <Navigate to="/demo" replace state={{ error: 'That demo role is not available. Choose Admin, Staff, or Client.' }} />;
   }
   if (activeRole !== role) {
-    return <Navigate to="/" replace state={{ error: 'Please choose a demo role before opening a dashboard.' }} />;
+    return <Navigate to="/demo" replace state={{ error: 'Please choose a demo role before opening a dashboard.' }} />;
   }
 
   const account = DEMO_ACCOUNTS.find((demoAccount) => demoAccount.role === activeRole);
   if (!account) {
-    return <Navigate to="/" replace state={{ error: 'That demo account is not available. Please select another role.' }} />;
+    return <Navigate to="/demo" replace state={{ error: 'That demo account is not available. Please select another role.' }} />;
   }
 
   if (role === 'client') return <ClientWorkspace clientEmail={account.email} onSignOut={onSignOut} />;
@@ -116,9 +138,11 @@ export default function App() {
   return (
     <ErrorBoundary>
       <ThemeSync />
-      <BrowserRouter>
-        <DemoApp />
-      </BrowserRouter>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+          <AppRoutes />
+        </BrowserRouter>
+      </QueryClientProvider>
     </ErrorBoundary>
   );
 }
