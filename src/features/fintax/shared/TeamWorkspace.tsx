@@ -21,7 +21,7 @@ import { BottomBar, CountUp, DocCards, NavDrawer, PALETTE, type NavEntry } from 
 import { FlowDiagram, PulseHero, StaffWorkflow } from './PulseUI';
 import MonthSubmissionsPanel from './MonthSubmissionsPanel';
 import { documentsVisibleTo } from './storage/selectors';
-import fintaxLogo from './image.png';
+import fintaxLogo from './fintax-logo.png';
 
 type Screen = 'overview' | 'documents' | 'review' | 'submissions' | 'banking' | 'correspondence' | 'payroll' | 'tasks' | 'exports' | 'clients' | 'admin';
 
@@ -426,8 +426,8 @@ export default function TeamWorkspace({ role, userName, onSignOut }: { role: Dem
       <header className={`workspace-topbar sticky top-0 z-20 ${role === 'admin' ? 'border-0 bg-transparent px-2 pt-2 sm:px-4' : 'border-b hairline bg-bg2/95'}`}>
         <div className={`workspace-topbar-card mx-auto flex max-w-[1500px] items-center gap-2 px-3 py-2.5 sm:gap-4 sm:px-6 sm:py-3 ${role === 'admin' ? 'flex-wrap rounded-[1.4rem] border border-white/90 bg-white/90 shadow-[0_18px_45px_-34px_rgba(30,41,59,.45)] backdrop-blur-xl' : ''}`}>
           <button type="button" className="grid size-10 shrink-0 place-items-center rounded-xl border hairline lg:hidden" aria-label="Open navigation" aria-controls="demo-mobile-navigation" aria-expanded={drawerOpen} onClick={() => setDrawerOpen(true)}><Menu className="size-4" /></button>
-          <span className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-white bg-white shadow-sm"><img src={fintaxLogo} alt="FinTax logo" className="size-full object-contain p-0.5" /></span>
-          <div className="workspace-topbar-brand min-w-0 flex-1"><p className="truncate font-semibold leading-tight">FinTax <span className="font-normal text-muted">Consulting</span></p><p className="workspace-topbar-subtitle text-xs text-muted">Client operations workspace</p></div>
+          <img src={fintaxLogo} alt="FinTax Consulting" className="brand-logo h-auto w-36 shrink-0 object-contain" />
+          <div className="workspace-topbar-brand min-w-0 flex-1"><p className="truncate font-semibold leading-tight">Client operations workspace</p></div>
           {role === 'admin' && <nav aria-label="Quick workspace navigation" className="hidden items-center gap-0.5 rounded-full bg-slate-100/80 p-1 xl:flex">
             {(['overview', 'documents', 'review', 'submissions', 'clients'] as Screen[]).map((item) => (
               <button key={item} type="button" onClick={() => navigateTo(item)} aria-current={screen === item ? 'page' : undefined} className={`rounded-full px-3 py-1.5 text-[11px] font-medium transition-colors ${screen === item ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'}`}>{item === 'review' ? 'Review queue' : item === 'clients' ? 'Clients' : item[0].toUpperCase() + item.slice(1)}</button>
@@ -584,8 +584,7 @@ function AdminSidebar({ screen, userName, reviewCount, questionCount, collapsed,
   return (
     <aside id="demo-navigation" className={`sticky top-[76px] hidden h-[calc(100dvh-96px)] min-h-[460px] flex-col rounded-[1.35rem] border border-white/90 bg-white/85 p-2.5 shadow-[0_20px_55px_-38px_rgba(30,41,59,.4)] backdrop-blur-xl lg:flex ${collapsed ? 'items-center' : ''}`}>
       <div className={`flex items-center ${collapsed ? 'min-h-[72px] flex-col justify-center gap-1' : 'min-h-11 gap-2 px-1'}`}>
-        <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-xl border border-slate-100 bg-white shadow-sm"><img src={fintaxLogo} alt="FinTax logo" className="size-full object-contain p-0.5" /></span>
-        {!collapsed && <span className="min-w-0 flex-1 truncate text-sm font-semibold tracking-tight text-slate-900">FinTax</span>}
+        <img src={fintaxLogo} alt="FinTax Consulting" className={`brand-logo h-auto max-w-full object-contain ${collapsed ? 'w-10' : 'w-36 flex-1'}`} />
         <button type="button" onClick={onToggleCollapsed} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} aria-expanded={!collapsed} className="grid size-8 shrink-0 place-items-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900">
           <ChevronRight className={`size-4 transition-transform ${collapsed ? '' : 'rotate-180'}`} />
         </button>
@@ -868,6 +867,7 @@ function ReviewPanel({ adminStyle, documents, selected, onSelect, onUpdate, onAp
       <div className="grid gap-4 p-3 sm:gap-5 sm:p-5 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div>
           <div className={`mb-4 rounded-xl border p-3 text-xs leading-5 ${adminStyle ? 'border-amber-200 bg-amber-50/80 text-amber-900' : 'border-warn/20 bg-warn/5 text-muted'}`}><CircleAlert className={`mr-1.5 inline size-4 align-[-3px] ${adminStyle ? 'text-amber-600' : 'text-warn'}`} />{current.sample ? 'Illustrative sample values for this walkthrough.' : current.extractedText ? current.note : current.note ?? 'No extracted text is available.'} Verify every value against the original before approval.</div>
+          {current.clientNote && <div className="mb-4 rounded-xl border border-[#e8e2d2] bg-[#faf9f6] p-3 text-xs leading-5 text-[#0f1f3d]"><p className="font-semibold">Client note</p><p className="mt-1">{current.clientNote}</p></div>}
           <section className={`rounded-2xl border p-3 sm:p-4 ${adminStyle ? 'border-slate-200/80 bg-white' : 'hairline bg-bg/20'}`}>
             <div className="mb-3 flex items-center gap-2"><span className={`grid size-7 place-items-center rounded-lg ${adminStyle ? 'bg-blue-50 text-blue-700' : 'bg-cyan/10 text-cyan'}`}><FileText className="size-3.5" /></span><div><h3 className="text-xs font-semibold">Extracted document details</h3><p className="text-[10px] text-muted">Edit any value that does not match the original.</p></div></div>
           <div className="grid gap-3 sm:grid-cols-2">

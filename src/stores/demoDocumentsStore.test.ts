@@ -69,6 +69,7 @@ describe('shared demo document store', () => {
     const [document] = useDemoDocumentsStore.getState().documents;
     expect(document.clientRequest?.response).toBe('Replacement uploaded.');
     expect(document.clientRequest?.resolvedAt).toBeTruthy();
+    expect(document.clientRequest?.status).toBe('pending_review');
     expect(document.reviewHistory?.map((event) => event.action)).toEqual(['Information requested', 'Client response']);
     expect(useDemoDocumentsStore.getState().followUpTasks[0].status).toBe('completed');
   });

@@ -1,213 +1,607 @@
-import { useEffect, useRef, useState, type DragEvent, type MutableRefObject } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
-import { CheckCircle2, ChevronDown, Download, FileUp, ListChecks, Paperclip, RotateCw, Save } from 'lucide-react';
+import { useEffect, useState, type DragEvent, type MutableRefObject, type RefObject } from 'react';
+import { motion, useReducedMotion } from 'framer-motion';
+import {
+  AlertTriangle,
+  CalendarClock,
+  Check,
+  CheckCircle2,
+  Camera,
+  Download,
+  FileUp,
+  Info,
+  RotateCw,
+  Save,
+  ShieldCheck,
+} from 'lucide-react';
 import { Button, ProgressBar } from '@/components/ui/primitives';
 import type { AssistantLanguage } from '../clientAssistant';
-import { extractDemoFields, type DemoCategory, type DemoDocument, type DemoFields } from '../../shared/demoWorkflow';
-import { CATEGORY_GROUPS, categoryLabel, PIPELINE, t3 } from '../clientPageUtils';
-import { MAX_DEMO_FILE_BYTES } from '../../shared/demoWorkflow';
+import { categoryForFilename, DEMO_CATEGORIES, extractDocumentDetails, extractDocumentFields, type DemoCategory, type DemoDocument, type DemoFields } from '../../shared/demoWorkflow';
+import { t3 } from '../clientPageUtils';
+import { CLIENT_MAX_UPLOAD_BYTES } from '../../shared/demoWorkflow';
+import { portalText, usePortalLanguage } from '../../shared/portalLanguage';
+import { AREAS, cx, type ClientArea } from '../clientUi';
+import type { MonthlyPeriod } from '../../shared/storage/models';
 
-const MAX_PDF_PAGES = 200;
+export type { ClientArea };
 
 interface ClientDocumentUploadPageProps {
   activePeriodDocuments: DemoDocument[];
   pendingDocuments: DemoDocument[];
+  reviewTargetId?: string | null;
   storageReady: boolean;
   storageError: string;
   category: DemoCategory;
+  selectedTypeId?: string;
+  selectedArea?: ClientArea;
+  activePeriod?: MonthlyPeriod;
+  periods: MonthlyPeriod[];
+  periodReadOnly: boolean;
+  onSelectPeriod: (periodId: string) => void;
+  uploadNote: string;
+  onUploadNoteChange: (note: string) => void;
   lang: AssistantLanguage;
-  reduceMotion: boolean | null;
   dragOver: boolean;
   uploadError: string;
   notice: string;
   fileInput: MutableRefObject<HTMLInputElement | null>;
   cameraInput: MutableRefObject<HTMLInputElement | null>;
+  primarySaveRef?: RefObject<HTMLButtonElement>;
   onCategoryChange: (category: DemoCategory) => void;
+  onReviewDocument?: (documentId: string) => void;
+  onTypeChange?: (typeId: string) => void;
+  onAreaChange?: (area: ClientArea) => void;
+  onOpenCamera: () => void;
   onDrop: (event: DragEvent<HTMLElement>) => void;
   onDragOver: () => void;
   onDragLeave: () => void;
   onCancelUpload: (document: DemoDocument) => void;
-  onSaveDraft: (document: DemoDocument, text: string, fields: DemoFields) => void;
+  onSaveDraft: (document: DemoDocument, text: string, fields: DemoFields, details: Record<string, string>) => void;
+  onChangeDocumentType: (document: DemoDocument, category: DemoCategory) => void;
 }
 
-function ExtractedDocumentReview({ item, storageReady, onSave }: {
+type UploadType = { id: string; label: [string, string, string]; category: DemoCategory };
+
+export const AREA_CHECKBOXES: Record<ClientArea, UploadType[]> = {
+  formation: [
+    { id: 'f-id', label: ['ID card / Passport', 'Personalausweis / Reisepass', 'بطاقة الهوية / جواز السفر'], category: 'identity_document' },
+    { id: 'f-license', label: ['Business registration', 'Gewerbeanmeldung', 'تسجيل النشاط التجاري'], category: 'company_formation' },
+    { id: 'f-register', label: ['Commercial register extract', 'Handelsregisterauszug', 'مستخرج السجل التجاري'], category: 'commercial_register' },
+    { id: 'f-articles', label: ['Articles of association', 'Gesellschaftsvertrag', 'عقد تأسيس الشركة'], category: 'company_formation' },
+    { id: 'f-tax-number', label: ['Tax number', 'Steuernummer', 'الرقم الضريبي'], category: 'other' },
+    { id: 'f-iban', label: ['Bank details (IBAN)', 'Bankverbindung (IBAN)', 'بيانات البنك (IBAN)'], category: 'other' },
+    { id: 'f-social-security', label: ['Social security documents', 'Sozialversicherungsnachweise', 'مستندات الضمان الاجتماعي'], category: 'payroll' },
+    { id: 'f-other', label: ['Other', 'Sonstiges', 'أخرى'], category: 'other' },
+  ],
+  payroll: [
+    { id: 'p-slips', label: ['Payroll documents', 'Lohnunterlagen', 'مستندات الرواتب'], category: 'payroll' },
+    { id: 'p-sick', label: ['Sick notes', 'Krankmeldungen', 'إشعارات المرض'], category: 'sick_note' },
+    { id: 'p-hours', label: ['Timesheets', 'Stundennachweise', 'سجلات ساعات العمل'], category: 'timesheet' },
+    { id: 'p-newhire', label: ['New employees', 'Neueinstellungen', 'موظفون جدد'], category: 'employee_record' },
+    { id: 'p-leavers', label: ['Departures', 'Austritte', 'مغادرة الموظفين'], category: 'employee_record' },
+    { id: 'p-leave', label: ['Leave / time off', 'Urlaub / Freistellung', 'إجازة / إعفاء من العمل'], category: 'payroll' },
+    { id: 'p-other', label: ['Other', 'Sonstiges', 'أخرى'], category: 'other' },
+  ],
+  accounting: [
+    { id: 'a-bank', label: ['Bank statements', 'Kontoauszüge', 'كشوف الحساب البنكي'], category: 'bank_statement' },
+    { id: 'a-purchase', label: ['Incoming invoices', 'Eingangsrechnungen', 'فواتير واردة'], category: 'purchase_invoice' },
+    { id: 'a-sales', label: ['Outgoing invoices', 'Ausgangsrechnungen', 'فواتير صادرة'], category: 'sales_invoice' },
+    { id: 'a-cash', label: ['Cash receipts', 'Kassenbelege', 'إيصالات نقدية'], category: 'receipt' },
+    { id: 'a-hospitality', label: ['Business meal receipts', 'Bewirtungsbelege', 'إيصالات ضيافة العمل'], category: 'receipt' },
+    { id: 'a-fuel', label: ['Fuel receipts', 'Tankbelege', 'إيصالات الوقود'], category: 'receipt' },
+    { id: 'a-other', label: ['Other', 'Sonstiges', 'أخرى'], category: 'other' },
+  ],
+  correspondence: [
+    { id: 'c-authority', label: ['Letters from authorities', 'Behördenschreiben', 'خطابات الجهات الرسمية'], category: 'correspondence' },
+    { id: 'c-contract', label: ['Lease agreement', 'Mietvertrag', 'عقد إيجار'], category: 'other_correspondence' },
+    { id: 'c-other', label: ['Other documents', 'Sonstige Unterlagen', 'مستندات أخرى'], category: 'other_correspondence' },
+  ],
+};
+
+export function uploadTypeForCategory(area: ClientArea, category: DemoCategory): string {
+  return AREA_CHECKBOXES[area].find((item) => item.category === category)?.id
+    ?? AREA_CHECKBOXES[area][0].id;
+}
+
+function ExtractedDocumentReview({ item, storageReady, onSave, onChangeType, primarySaveRef, lang }: {
   item: DemoDocument;
   storageReady: boolean;
-  onSave: (document: DemoDocument, text: string, fields: DemoFields) => void;
+  onSave: (document: DemoDocument, text: string, fields: DemoFields, details: Record<string, string>) => void;
+  onChangeType: (document: DemoDocument, category: DemoCategory) => void;
+  primarySaveRef?: RefObject<HTMLButtonElement>;
+  lang: AssistantLanguage;
 }) {
   const [text, setText] = useState(item.extractedText ?? '');
   const [fields, setFields] = useState(item.fields);
-  const reextractFields = () => setFields(extractDemoFields(text).fields);
+  const [details, setDetails] = useState(item.extractedDetails ?? {});
+  const portalLang = usePortalLanguage((state) => state.language);
+  const fieldKeys: (keyof DemoFields)[] = item.category === 'bank_statement'
+    ? ['documentDate', 'counterparty', 'description', 'reference']
+    : item.category === 'identity_document'
+      ? ['counterparty', 'reference', 'documentDate']
+      : item.category === 'correspondence' || item.category === 'other_correspondence'
+        ? ['documentDate', 'counterparty', 'reference', 'description']
+      : item.category === 'commercial_register' || item.category === 'company_formation' || item.category === 'contract'
+        ? ['counterparty', 'reference', 'documentDate']
+        : ['documentDate', 'counterparty', 'reference', 'description', 'netAmount', 'vatRate', 'vatAmount', 'grossAmount'];
+  const detectedCategory = categoryForFilename(item.name, text);
+  const isCompatibleFormationType = [detectedCategory, item.category].every((value) => value === 'company_formation' || value === 'contract');
+  const hasTypeMismatch = detectedCategory !== 'other' && detectedCategory !== item.category && !isCompatibleFormationType;
+  const detectedFieldCount = fieldKeys.filter((key) => fields[key].trim()).length;
+  useEffect(() => {
+    setFields(item.fields);
+    setDetails(item.extractedDetails ?? extractDocumentDetails(item.category, text));
+  }, [item.category, item.fields, item.extractedDetails]);
+  const reextractFields = () => {
+    setFields(extractDocumentFields(item.category, text, item.name).fields);
+    setDetails(extractDocumentDetails(item.category, text));
+  };
 
-  return <article className="space-y-4 rounded-3xl border border-violet/15 bg-white/90 p-4 shadow-sm sm:p-5">
-    <div className="flex flex-wrap items-start justify-between gap-3">
-      <div className="min-w-0">
-        <h3 className="truncate text-sm font-semibold">{item.name}</h3>
-        <p className="mt-1 text-xs text-muted">{item.ocrEngine ?? 'Local text extraction'} · {item.pageCount ? `${item.pageCount} pages` : 'Document'} · {Math.round(item.confidence * 100)}% field confidence</p>
+  return (
+    <article id={`client-extracted-review-${item.id}`} className="scroll-mt-24 space-y-4 rounded-3xl border border-[#e8e2d2] bg-white p-4 shadow-sm sm:p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="truncate text-sm font-semibold">{item.name}</h3>
+          <p className="mt-1 text-xs text-muted">
+            {item.ocrEngine ?? 'Local text extraction'} · {item.pageCount ? `${item.pageCount} pages` : 'Document'} ·{' '}
+            <span className="font-semibold text-ink">{detectedFieldCount} {detectedFieldCount === 1 ? 'field' : 'fields'} found automatically</span>
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${item.confidence >= 0.65 ? 'bg-[#1F8A5B]/10 text-[#176b46]' : 'bg-[#D98A1B]/10 text-[#8A5600]'}`}>
+            {item.confidence >= 0.65 ? <CheckCircle2 className="size-3.5" /> : <AlertTriangle className="size-3.5" />}
+            {item.confidence >= 0.65 ? 'Ready to review' : 'Some details need a check'}
+          </span>
+          {item.file && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="min-h-10 rounded-full"
+              icon={<Download className="size-3.5" />}
+              onClick={() => {
+                const url = URL.createObjectURL(item.file!);
+                const anchor = document.createElement('a');
+                anchor.href = url;
+                anchor.download = item.name;
+                anchor.click();
+                window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+              }}
+            >
+              Download original
+            </Button>
+          )}
+        </div>
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="rounded-full bg-warn/10 px-3 py-1 text-[11px] font-medium text-warn">Not shared with staff yet</span>
-        {item.file && <Button size="sm" variant="outline" className="min-h-10 rounded-full" icon={<Download className="size-3.5" />} onClick={() => {
-          const url = URL.createObjectURL(item.file!);
-          const anchor = document.createElement('a');
-          anchor.href = url;
-          anchor.download = item.name;
-          anchor.click();
-          window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-        }}>Download original</Button>}
+
+      {hasTypeMismatch && (
+        <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#D98A1B]/40 bg-[#D98A1B]/10 p-3 text-sm text-[#664000]">
+          <span>{t3(lang, `This looks like a ${DEMO_CATEGORIES.find(([key]) => key === detectedCategory)?.[1] ?? 'different document'} rather than the selected type.`, `Dies sieht nach einem anderen Dokumenttyp aus.`, `يبدو أن هذا مستند من نوع مختلف عن المحدد.`)}</span>
+          <Button size="sm" variant="outline" className="min-h-11 rounded-xl" onClick={() => onChangeType(item, detectedCategory)}>
+            {t3(lang, 'Change type', 'Typ ändern', 'تغيير النوع')}
+          </Button>
+        </div>
+      )}
+
+      {/* Staff final approval notice */}
+      <div className="flex items-center gap-2 rounded-xl border border-[#5579ae]/20 bg-[#edf2f9] p-3 text-xs text-[#0f1f3d]">
+        <ShieldCheck className="size-4 shrink-0 text-[#5579ae]" />
+        <span>{portalText(portalLang, 'staffFinalApproval')}</span>
       </div>
-    </div>
-    {item.note && <p className="rounded-xl bg-cyan/5 p-3 text-xs text-muted">{item.note}</p>}
-    {item.validationWarnings?.length ? <div role="status" className="rounded-xl border border-warn/20 bg-warn/5 p-3 text-xs"><p className="font-semibold">Please verify</p><ul className="mt-1 list-inside list-disc text-muted">{item.validationWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></div> : null}
-    <label className="block text-xs font-medium" htmlFor={`ocr-text-${item.id}`}>Extracted text (editable)</label>
-    <textarea
-      id={`ocr-text-${item.id}`}
-      value={text}
-      onChange={(event) => setText(event.target.value)}
-      rows={Math.min(18, Math.max(7, text.split('\n').length + 2))}
-      className="w-full rounded-xl border border-ink/10 bg-white p-3 font-mono text-xs leading-5 outline-none focus:border-violet/50"
-      spellCheck
-    />
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <h4 className="text-sm font-semibold">Extracted fields</h4>
-      <Button size="sm" variant="outline" className="min-h-10 rounded-full" icon={<RotateCw className="size-3.5" />} onClick={reextractFields}>Re-read fields from text</Button>
-    </div>
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      {(Object.keys(fields) as (keyof DemoFields)[]).map((key) => (
-        <label key={key} className="block text-xs font-medium">
-          {key.replace(/([A-Z])/g, ' $1').replace(/^./, (letter) => letter.toUpperCase())}
-          <input
-            value={fields[key]}
-            onChange={(event) => setFields((current) => ({ ...current, [key]: event.target.value }))}
-            className="mt-1 h-10 w-full rounded-lg border border-ink/10 bg-white px-3 text-sm font-normal outline-none focus:border-violet/50"
-          />
+
+      {/* Farsi OCR notice if applicable */}
+      {lang === 'fa' && (
+        <div className="flex items-center gap-2 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-800 dark:text-amber-300">
+          <Info className="size-4 shrink-0" />
+          <span>{portalText(portalLang, 'farsiOcrUnavailable')}</span>
+        </div>
+      )}
+
+      {item.note && <p className="rounded-xl bg-[#f3f6fa] p-3 text-xs leading-5 text-muted">{item.note}</p>}
+
+      {!text.trim() ? (
+        <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          We could not read text from this file. Check that it is clear and upright, try a higher-quality scan, or enter the document details manually below.
+        </div>
+      ) : (
+        <section className="rounded-xl border border-[#E6E0D0] bg-[#FAF9F6] p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h4 className="text-sm font-semibold text-[#0F1B3D]">{t3(lang, 'Review extracted results', 'Ausgelesene Ergebnisse prüfen', 'راجع النتائج المستخرجة')}</h4>
+            <span className="text-xs text-[#4A5468]">{Object.values(details).filter((value) => value.trim()).length} candidate details · please verify</span>
+          </div>
+          {Object.keys(details).length ? (
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              {Object.entries(details).map(([label, value]) => (
+                <label key={label} className="min-w-0 text-sm font-medium text-[#1F2A44]">
+                  {label}
+                  <input value={value} onChange={(event) => setDetails((current) => ({ ...current, [label]: event.target.value }))} className={`mt-1 h-11 w-full rounded-xl border px-3 text-sm font-normal outline-none focus:border-[#0B7F99] ${value.trim() ? item.confidence >= 0.65 ? 'border-[#1F8A5B]/50 bg-[#1F8A5B]/5' : 'border-[#D98A1B]/50 bg-[#D98A1B]/5' : 'border-[#E6E0D0] bg-white'}`} />
+                </label>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-2 text-sm leading-5 text-[#4A5468]">No extra details could be identified. You can enter the key details below.</p>
+          )}
+        </section>
+      )}
+
+      {/* Failed validation checks */}
+      {item.validationWarnings?.length ? (
+        <div role="status" className="rounded-xl border border-rose-500/25 bg-rose-500/5 p-3 text-xs">
+          <p className="font-semibold text-rose-800 dark:text-rose-300 flex items-center gap-1.5">
+            <AlertTriangle className="size-3.5 text-rose-600" /> Validation checks flagged for review
+          </p>
+          <ul className="mt-1 list-inside list-disc text-muted space-y-0.5">
+            {item.validationWarnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      <details className="rounded-xl border border-[#E6E0D0] bg-white p-3">
+        <summary className="min-h-11 cursor-pointer text-sm font-semibold text-[#1F2A44]">{t3(lang, 'Show extracted text', 'Ausgelesenen Text anzeigen', 'عرض النص المستخرج')}</summary>
+        <label className="flex flex-wrap items-center justify-between gap-1 text-sm font-semibold text-[#1F2A44]" htmlFor={`ocr-text-${item.id}`}>
+          <span>{t3(lang, 'Text read from your file · edit if needed', 'Ausgelesener Text · bei Bedarf bearbeiten', 'النص المستخرج · عدّله عند الحاجة')}</span>
+          <span className="font-normal text-[#4A5468]">{text.length.toLocaleString()} characters{item.pageCount ? ` · ${item.pageCount} pages` : ''}</span>
         </label>
-      ))}
-    </div>
-    {item.ocrPages?.length ? <details className="rounded-xl border border-ink/5 p-3">
-      <summary className="cursor-pointer text-xs font-medium">Page-by-page OCR confidence</summary>
-      <ul className="mt-2 space-y-1 text-[11px] text-muted">{item.ocrPages.map((page) => <li key={page.page}>Page {page.page}: {Math.round(page.confidence * 100)}%</li>)}</ul>
-    </details> : null}
-    <div className="flex flex-wrap justify-end gap-2 border-t border-ink/5 pt-4">
-      <Button variant="primary" className="min-h-11 rounded-full" disabled={!storageReady} icon={<Save className="size-4" />} onClick={() => onSave(item, text, fields)}>Save and share with staff</Button>
-    </div>
-  </article>;
+        <textarea
+          id={`ocr-text-${item.id}`}
+          value={text}
+          onChange={(event) => {
+            setText(event.target.value);
+            setDetails(extractDocumentDetails(item.category, event.target.value));
+          }}
+          rows={8}
+          className="mt-2 max-h-80 w-full rounded-xl border border-[#E6E0D0] bg-white p-3 font-mono text-sm leading-5 outline-none focus:border-[#0B7F99]"
+          spellCheck
+        />
+      </details>
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h4 className="text-sm font-semibold text-[#0f1f3d]">Check these details before sharing</h4>
+          <p className="mt-0.5 text-[11px] text-slate-500">{detectedFieldCount} of {fieldKeys.length} fields filled from the document. Please check each one.</p>
+        </div>
+        <Button size="sm" variant="outline" className="min-h-9 rounded-full text-xs" icon={<RotateCw className="size-3" />} onClick={reextractFields}>
+          Re-read details
+        </Button>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        {fieldKeys.map((key) => (
+        <label key={key} className="block text-sm font-medium text-[#1F2A44]">
+          {({ documentDate: item.category === 'bank_statement' ? 'Statement period / date' : item.category === 'identity_document' ? 'Expiry date / issue date' : 'Document date', counterparty: item.category === 'identity_document' ? 'Name' : 'Company / other party', reference: item.category === 'identity_document' ? 'Document number' : item.category === 'commercial_register' ? 'HRB number' : 'Invoice / reference number', description: item.category === 'bank_statement' ? 'Bank / transaction summary' : 'Document type / description', netAmount: 'Net amount', vatRate: 'VAT rate', vatAmount: 'VAT amount', grossAmount: 'Gross amount', debitAccount: 'Debit account', creditAccount: 'Credit account' })[key]}
+            <input
+              value={fields[key]}
+              onChange={(event) => setFields((current) => ({ ...current, [key]: event.target.value }))}
+            className={`mt-1 h-11 w-full rounded-xl border px-3 text-sm font-normal outline-none focus:border-[#0B7F99] ${fields[key].trim() ? item.confidence >= 0.65 ? 'border-[#1F8A5B]/50 bg-[#1F8A5B]/5' : 'border-[#D98A1B]/50 bg-[#D98A1B]/5' : 'border-[#E6E0D0] bg-white'}`}
+            />
+            {fields[key].trim() && <span className={`mt-1 inline-flex items-center gap-1 text-xs ${item.confidence >= 0.65 ? 'text-[#1F8A5B]' : 'text-[#8A5600]'}`}>
+              {item.confidence >= 0.65 ? <CheckCircle2 className="size-3.5" /> : <AlertTriangle className="size-3.5" />}
+              {item.confidence >= 0.65 ? 'Confident match' : 'Please verify'}
+            </span>}
+          </label>
+        ))}
+      </div>
+
+      <div className="flex flex-col-reverse gap-2 border-t border-[#E6E0D0] pt-4 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-sm leading-5 text-[#4A5468]">Saving shares the original and your corrections with your FinTax team for final review.</p>
+      <Button ref={primarySaveRef} variant="primary" className="min-h-11 rounded-xl bg-[#0B7F99] text-white hover:bg-[#096A80]" disabled={!storageReady} icon={<Save className="size-4" />} onClick={() => onSave(item, text, fields, details)}>
+          Save and send for review
+        </Button>
+      </div>
+    </article>
+  );
 }
 
 export default function ClientDocumentUploadPage({
   activePeriodDocuments,
   pendingDocuments,
+  reviewTargetId,
   storageReady,
   storageError,
   category,
+  selectedTypeId: selectedTypeIdProp,
+  selectedArea: initialArea = 'accounting',
+  activePeriod,
+  periods,
+  periodReadOnly,
+  onSelectPeriod,
+  uploadNote,
+  onUploadNoteChange,
   lang,
-  reduceMotion,
   dragOver,
   uploadError,
   notice,
   fileInput,
   cameraInput,
+  primarySaveRef,
   onCategoryChange,
+  onReviewDocument,
+  onTypeChange,
+  onAreaChange,
+  onOpenCamera,
   onDrop,
   onDragOver,
   onDragLeave,
   onCancelUpload,
   onSaveDraft,
+  onChangeDocumentType,
 }: ClientDocumentUploadPageProps) {
-  const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
-  const categoryMenuRef = useRef<HTMLDivElement>(null);
-  const categoryTriggerRef = useRef<HTMLButtonElement>(null);
+  const [activeArea, setActiveArea] = useState<ClientArea>(initialArea);
+  const [selectedTypeId, setSelectedTypeId] = useState(() => selectedTypeIdProp ?? uploadTypeForCategory(initialArea, category));
+  const [queueOpen, setQueueOpen] = useState(false);
+  const portalLang = usePortalLanguage((state) => state.language);
+  const reduceMotion = useReducedMotion();
+  const activeAreaConfig = AREAS.find((item) => item.key === activeArea) ?? AREAS[0];
+  const periodYears = [...new Set(periods.filter((period) => !activePeriod || period.month === activePeriod.month).map((period) => period.year))].sort((a, b) => b - a);
+  const periodMonths = [...new Set(periods.filter((period) => !activePeriod || period.year === activePeriod.year).map((period) => period.month))].sort((a, b) => a - b);
+  const monthLabel = (month: number) => new Date(2026, month - 1, 1).toLocaleDateString(
+    lang === 'de' ? 'de-DE' : lang === 'ar' ? 'ar-AE' : 'en-US',
+    { month: 'long' },
+  );
+  const selectAvailablePeriod = (year: number, month: number) => {
+    const exactPeriod = periods.find((period) => period.year === year && period.month === month);
+    if (exactPeriod) onSelectPeriod(exactPeriod.id);
+  };
 
   useEffect(() => {
-    if (!categoryMenuOpen) return;
-    const closeOnOutsideClick = (event: PointerEvent) => {
-      if (event.target instanceof Node && !categoryMenuRef.current?.contains(event.target)) {
-        setCategoryMenuOpen(false);
-      }
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setCategoryMenuOpen(false);
-        categoryTriggerRef.current?.focus();
-      }
-    };
-    document.addEventListener('pointerdown', closeOnOutsideClick);
-    document.addEventListener('keydown', closeOnEscape);
-    return () => {
-      document.removeEventListener('pointerdown', closeOnOutsideClick);
-      document.removeEventListener('keydown', closeOnEscape);
-    };
-  }, [categoryMenuOpen]);
+    setActiveArea(initialArea);
+  }, [initialArea]);
+
+  useEffect(() => {
+    if (selectedTypeIdProp) setSelectedTypeId(selectedTypeIdProp);
+  }, [selectedTypeIdProp]);
+
+  const switchArea = (area: ClientArea) => {
+    setActiveArea(area);
+    if (onAreaChange) onAreaChange(area);
+    const firstType = AREA_CHECKBOXES[area][0];
+    setSelectedTypeId(firstType?.id ?? '');
+    if (firstType) onTypeChange?.(firstType.id);
+    onCategoryChange(firstType?.category ?? 'other');
+  };
+
+  const chooseType = (id: string, cat: DemoCategory) => {
+    setSelectedTypeId(id);
+    onTypeChange?.(id);
+    onCategoryChange(cat);
+  };
+  const typeLabel = (item: UploadType) => t3(lang, ...item.label);
+  const selectedType = AREA_CHECKBOXES[activeArea].find((item) => item.id === selectedTypeId) ?? AREA_CHECKBOXES[activeArea][0];
+
+  const uploadDisabled = !storageReady || periodReadOnly;
+  const areaTitle = (area: ClientArea) => ({
+    formation: t3(lang, 'Company documents', 'Unternehmensunterlagen', 'مستندات الشركة'),
+    payroll: t3(lang, 'Payroll', 'Lohnabrechnung', 'الرواتب'),
+    accounting: t3(lang, 'Accounting', 'Buchhaltung', 'المحاسبة'),
+    correspondence: t3(lang, 'Correspondence', 'Korrespondenz', 'المراسلات'),
+  })[area];
+
+  const scrollToReview = (id: string) => {
+    const review = document.getElementById(`client-extracted-review-${id}`);
+    const scrollArea = review?.closest<HTMLElement>('.client-upload-scroll');
+    if (!review || !scrollArea) return;
+    const top = scrollArea.scrollTop + review.getBoundingClientRect().top - scrollArea.getBoundingClientRect().top - 12;
+    scrollArea.scrollTo({ top, behavior: reduceMotion ? 'auto' : 'smooth' });
+  };
+
+  useEffect(() => {
+    if (!reviewTargetId) return;
+    const timer = window.setTimeout(() => scrollToReview(reviewTargetId), 120);
+    return () => window.clearTimeout(timer);
+  }, [reviewTargetId, reduceMotion]);
+
+  useEffect(() => {
+    if (activePeriodDocuments.length) setQueueOpen(true);
+  }, [activePeriodDocuments.length]);
+
+  useEffect(() => {
+    if (reviewTargetId) setQueueOpen(true);
+  }, [reviewTargetId]);
+
+  const selectedPendingDocument = pendingDocuments.find((item) => item.id === reviewTargetId);
 
   return (
     <>
       {notice && <p role="status" className="rounded-xl border border-ok/20 bg-ok/5 p-3 text-sm text-ink">{notice}</p>}
+
+      {uploadError && (
+        <div role="alert" className="rounded-xl border border-rose-500/25 bg-rose-500/10 p-3 text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2">
+          <AlertTriangle className="size-4 shrink-0 text-rose-600" />
+          <span>{uploadError.includes('failed') ? portalText(portalLang, 'processingFailed') : uploadError}</span>
+        </div>
+      )}
+
       {storageError
         ? <p role="alert" className="rounded-xl border border-bad/20 bg-bad/5 p-3 text-sm text-bad">Browser storage error: {storageError}. Uploading and saving are disabled until storage is available.</p>
-        : !storageReady && <p role="status" className="rounded-xl border border-warn/20 bg-warn/5 p-3 text-sm text-muted">Preparing browser storage. Upload and save controls will be available when it is ready.</p>}
-      <section id="client-upload" className="grid scroll-mt-24 gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(280px,1fr)]" aria-label="Upload documents">
-        <motion.div onDrop={onDrop} onDragOver={(event) => { event.preventDefault(); onDragOver(); }} onDragLeave={onDragLeave}
-          className={`relative overflow-hidden rounded-3xl border-2 border-dashed p-4 text-center backdrop-blur transition-colors sm:p-9 ${dragOver ? 'border-violet bg-violet/10' : 'border-violet/30 bg-white/70'}`}>
-          <motion.span className="mx-auto grid size-14 place-items-center rounded-2xl bg-gradient-to-br from-violet to-blue text-white shadow-lg shadow-violet/30" animate={reduceMotion ? undefined : { y: dragOver ? -8 : [0, -6, 0] }} transition={{ duration: 3, repeat: Infinity }}><FileUp className="size-7" /></motion.span>
-          <h2 className="mt-4 text-lg font-semibold">{t3(lang, 'Drop your documents here', 'Dokumente hier ablegen', 'أسقط مستنداتك هنا')}</h2>
-          <p className="mt-1 text-sm text-muted">{t3(lang, 'or choose multiple files from your device', 'oder mehrere Dateien auswählen', 'أو اختر عدة ملفات من جهازك')}</p>
-          <div className="mx-auto mt-4 max-w-sm text-start">
-            <label id="client-document-category-label" className="text-xs font-medium">Document type (optional)</label>
-            <div ref={categoryMenuRef} className="relative mt-1">
-              <button ref={categoryTriggerRef} id="client-document-category" type="button" aria-labelledby="client-document-category-label"
-                aria-haspopup="listbox" aria-expanded={categoryMenuOpen} onClick={() => setCategoryMenuOpen((open) => !open)}
-                onKeyDown={(event) => {
-                  if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    setCategoryMenuOpen(true);
-                  }
-                }}
-                className="flex h-10 w-full items-center justify-between rounded-xl border border-ink/10 bg-white px-4 text-start text-sm shadow-sm transition-colors hover:border-violet/35 focus-visible:outline-violet">
-                <span>{categoryLabel(category)}</span>
-                <ChevronDown className={`size-4 text-muted transition-transform ${categoryMenuOpen ? 'rotate-180' : ''}`} />
-              </button>
-              <AnimatePresence>
-                {categoryMenuOpen && <motion.div role="listbox" aria-labelledby="client-document-category-label"
-                  initial={reduceMotion ? false : { opacity: 0, y: -4, scale: 0.99 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -4, scale: 0.99 }}
-                  transition={{ duration: 0.14 }} className="absolute inset-x-0 top-full z-30 mt-2 max-h-72 overflow-y-auto rounded-2xl border border-ink/10 bg-white p-2 text-start shadow-[0_18px_48px_-18px_rgba(31,28,55,.35)]">
-                  {CATEGORY_GROUPS.map((group) => <div key={group.label} className="py-1">
-                    <p className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[.12em] text-muted">{group.label}</p>
-                    {group.categories.map((item) => <button key={item} type="button" role="option" aria-selected={category === item}
-                      onClick={() => { onCategoryChange(item); setCategoryMenuOpen(false); categoryTriggerRef.current?.focus(); }}
-                      className={`flex min-h-9 w-full items-center justify-between rounded-lg px-3 text-sm transition-colors ${category === item ? 'bg-violet/10 font-medium text-violet' : 'text-ink hover:bg-violet/5'}`}>
-                      <span>{categoryLabel(item)}</span>{category === item && <CheckCircle2 className="size-4" />}
-                    </button>)}
-                  </div>)}
-                </motion.div>}
-              </AnimatePresence>
+        : !storageReady && <p role="status" className="rounded-xl border border-warn/20 bg-warn/5 p-3 text-sm text-muted">Preparing browser storage. Controls will be available when ready.</p>}
+
+      <section className="space-y-4">
+        <details className="group">
+          <summary className="flex min-h-9 cursor-pointer list-none flex-wrap items-center gap-2 text-sm font-medium text-[#1F2A44] [&::-webkit-details-marker]:hidden">
+            <span className="min-w-0 flex-1 truncate">{areaTitle(activeArea)}</span>
+            <span className="rounded-full bg-[#B07A2A]/10 px-3 py-1 text-xs font-semibold text-[#8A5E1F]">{t3(lang, 'Change', 'Ändern', 'تغيير')}</span>
+          </summary>
+          <div className="mt-2 border-t border-[#E6E0D0] pt-3">
+            <div role="group" aria-label={t3(lang, 'Choose an upload area', 'Upload-Bereich auswählen', 'اختر قسم الرفع')} className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {AREAS.map(({ key }) => (
+                <button key={key} type="button" aria-pressed={activeArea === key} onClick={() => switchArea(key)}
+                  className={cx('min-h-11 rounded-xl border px-3 text-start text-sm font-medium transition', activeArea === key ? 'border-[#B07A2A] bg-[#B07A2A]/10 text-[#1F2A44]' : 'border-[#E6E0D0] bg-white text-[#4A5468] hover:border-[#B07A2A]')}>
+                  {areaTitle(key)}
+                </button>
+              ))}
             </div>
-            <p className="mt-1.5 text-[10px] text-muted">{category === 'other' ? 'We will suggest a type from the file name.' : `New files will be labeled ${categoryLabel(category)}.`}</p>
           </div>
-          <Button className="mt-5 rounded-full px-6" variant="primary" disabled={!storageReady} icon={<Paperclip className="size-4" />} onClick={() => fileInput.current?.click()}>Choose files</Button>
-          <Button className="mt-3 rounded-full px-6" variant="outline" disabled={!storageReady} icon={<FileUp className="size-4" />} onClick={() => cameraInput.current?.click()}>Scan with camera</Button>
-          <p className="mt-4 text-[11px] leading-5 text-muted">PDF, photos/scans, XLSX, CSV, TXT and DOCX · up to {MAX_DEMO_FILE_BYTES / 1024 / 1024} MB each · PDFs up to {MAX_PDF_PAGES} pages</p>
-          {uploadError && <p role="alert" className="mt-3 text-xs text-bad">{uploadError}</p>}
-        </motion.div>
-        <motion.div className="rounded-3xl border border-white bg-white/80 p-4 shadow-sm backdrop-blur sm:p-5">
-          <p className="flex items-center gap-2 font-semibold"><ListChecks className="size-4 text-violet" />Processing in this demo</p>
-          <ol className="mt-4 space-y-2.5 text-xs text-muted">{PIPELINE.map(([, label], index) => <motion.li key={label} initial={reduceMotion ? false : { opacity: 0, x: -8 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true }} transition={{ delay: index * 0.05 }} className="flex items-center gap-2"><span className="grid size-5 place-items-center rounded-full bg-violet/10 text-[10px] text-violet">{index + 1}</span>{label}</motion.li>)}</ol>
-          <div className="mt-4 rounded-xl border border-warn/20 bg-warn/5 p-3 text-[11px] leading-5 text-muted">PDF text and photo OCR are processed locally; XLSX, CSV, TXT and DOCX text is extracted in this browser. Scanned PDFs are limited to 10 OCR pages; handwriting and low-quality photos may be inaccurate and need staff review. Files stay in this browser and are not sent to a server. Use fictional samples only.</div>
-        </motion.div>
-        {pendingDocuments.length > 0 && <section className="space-y-4" aria-label="Review extracted documents">
-          <div>
-            <h2 className="text-lg font-semibold">Review extracted documents</h2>
-            <p className="mt-1 text-sm text-muted">Check OCR against the original, edit the extracted text or fields, then save to share each document with your FinTax team.</p>
-          </div>
-          {pendingDocuments.map((item) => <ExtractedDocumentReview key={item.id} item={item} storageReady={storageReady} onSave={onSaveDraft} />)}
-        </section>}
-        {activePeriodDocuments.some((item) => item.status === 'processing') && <div className="rounded-3xl border border-violet/10 bg-white/85 p-4 shadow-sm lg:col-span-2">
-            <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-semibold">Upload queue</h3><span className="text-[11px] text-muted">{activePeriodDocuments.filter((item) => item.status === 'processing').length} processing or awaiting your save</span></div>
-            <ul className="mt-3 divide-y divide-ink/5">{activePeriodDocuments.filter((item) => item.status === 'processing').map((item) => <li key={item.id} className="flex flex-wrap items-center gap-3 py-3">
-              <span className="min-w-40 flex-1 truncate text-xs font-medium">{item.name}<span className="mt-1 block text-[10px] font-normal text-muted">{item.extractedText !== undefined ? 'OCR finished · review and save below' : `${item.workflowStage?.replace(/_/g, ' ') ?? 'queued'} · ${item.note}`}</span></span>
-              <span className="w-28"><ProgressBar value={item.processingProgress ?? 0} active /></span>
-              {item.extractedText === undefined && <Button size="sm" variant="outline" className="min-h-10 rounded-full" onClick={() => onCancelUpload(item)}>Cancel</Button>}
-            </li>)}</ul>
-          </div>}
+        </details>
+
+        {activeAreaConfig.hasUploadPeriod && activePeriod && (
+          <details className="client-upload-period-details rounded-xl border border-[#E6E0D0] bg-white px-3">
+            <summary className="flex min-h-11 cursor-pointer items-center gap-2 text-xs font-semibold text-[#1F2A44]">
+              <CalendarClock className="size-4 text-[#0B7F99]" />
+              {monthLabel(activePeriod.month)} {activePeriod.year}
+              <span className="ms-auto rounded-full bg-[#B07A2A]/10 px-2.5 py-1 text-[10px] text-[#8A5E1F]">{t3(lang, 'Change', 'Ändern', 'تغيير')}</span>
+            </summary>
+            <fieldset className="grid grid-cols-2 gap-3 border-t border-[#E6E0D0] py-3">
+              <legend className="sr-only">{t3(lang, 'Upload period', 'Abrechnungszeitraum', 'فترة الرفع')}</legend>
+              <label className="text-[10px] font-semibold uppercase tracking-[.14em] text-[#4A5468]">{t3(lang, 'Month', 'Monat', 'الشهر')}
+                <select value={activePeriod.month} onChange={(event) => selectAvailablePeriod(activePeriod.year, Number(event.target.value))} className="mt-1.5 h-11 w-full rounded-xl border border-[#E6E0D0] bg-[#F8F6F1] px-3 text-sm font-normal normal-case tracking-normal text-[#1F2A44]">
+                  {periodMonths.map((month) => <option key={month} value={month}>{monthLabel(month)}</option>)}
+                </select>
+              </label>
+              <label className="text-[10px] font-semibold uppercase tracking-[.14em] text-[#4A5468]">{t3(lang, 'Year', 'Jahr', 'السنة')}
+                <select value={activePeriod.year} onChange={(event) => selectAvailablePeriod(Number(event.target.value), activePeriod.month)} className="mt-1.5 h-11 w-full rounded-xl border border-[#E6E0D0] bg-[#F8F6F1] px-3 text-sm font-normal normal-case tracking-normal text-[#1F2A44]">
+                  {periodYears.map((year) => <option key={year} value={year}>{year}</option>)}
+                </select>
+              </label>
+            </fieldset>
+          </details>
+        )}
+
+        <details className="client-document-type-details rounded-xl border border-[#E6E0D0] bg-white px-3">
+          <summary className="flex min-h-11 cursor-pointer items-center gap-2 text-xs font-semibold text-[#1F2A44]">
+            <span className="min-w-0 flex-1 truncate">{selectedType ? typeLabel(selectedType) : t3(lang, 'Document type', 'Art der Unterlagen', 'نوع المستند')}</span>
+            <span className="shrink-0 rounded-full bg-[#B07A2A]/10 px-2.5 py-1 text-[10px] text-[#8A5E1F]">{t3(lang, 'Change', 'Ändern', 'تغيير')}</span>
+          </summary>
+          <fieldset className="client-document-type-picker border-t border-[#E6E0D0] py-3">
+            <legend className="sr-only">{t3(lang, 'Document type', 'Art der Unterlagen', 'نوع المستند')}</legend>
+            <div className="client-document-type-chips flex gap-2 overflow-x-auto">
+              {AREA_CHECKBOXES[activeArea].map((item) => (
+                <label key={item.id} className={cx('flex min-h-11 cursor-pointer items-center gap-2.5 rounded-xl border bg-white px-3 py-2 text-sm leading-5 transition-colors hover:border-[#B07A2A] focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[#0B7F99]', selectedTypeId === item.id ? 'border-[#B07A2A] text-[#1F2A44]' : 'border-[#E6E0D0] text-[#4A5468]')}>
+                  <input type="radio" name="upload-document-type" value={item.id} checked={selectedTypeId === item.id} onChange={() => chooseType(item.id, item.category)} className="sr-only" />
+                  <span aria-hidden="true" className={cx('grid size-4 shrink-0 place-items-center rounded border', selectedTypeId === item.id ? 'border-[#0B7F99] bg-[#0B7F99] text-white' : 'border-[#9AA0A6] bg-white')}>
+                    {selectedTypeId === item.id && <Check className="size-3" strokeWidth={3} />}
+                  </span>
+                  <span>{typeLabel(item)}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        </details>
+
+        <section id="client-upload" className="scroll-mt-24 space-y-4" aria-label={t3(lang, 'Upload form', 'Upload-Formular', 'نموذج الرفع')}>
+          <motion.div
+            onDrop={onDrop}
+            onDragOver={(event) => { event.preventDefault(); onDragOver(); }}
+            onDragLeave={onDragLeave}
+            onClick={(event) => {
+              if (uploadDisabled || (event.target as HTMLElement).closest('button, a, input, select, textarea')) return;
+              fileInput.current?.click();
+            }}
+            onKeyDown={(event) => {
+              if (event.target !== event.currentTarget || uploadDisabled) return;
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                fileInput.current?.click();
+              }
+            }}
+            role="group"
+            tabIndex={uploadDisabled ? -1 : 0}
+            className={cx(
+              'relative min-w-0 overflow-hidden rounded-xl border-2 border-dashed bg-white transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0B7F99]',
+              dragOver ? 'border-[#0B7F99] bg-[#0B7F99]/5 upload-drop-active' : 'border-[#eee5d7]',
+              !uploadDisabled && 'cursor-pointer',
+            )}
+            aria-label={t3(lang, 'Add files: choose files or drop them here', 'Dateien hinzufügen: auswählen oder hier ablegen', 'أضف ملفات: اخترها أو أفلتها هنا')}
+          >
+            {periodReadOnly && (
+              <p role="status" className="mx-auto mt-3 max-w-lg rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                {t3(lang, 'This month is read-only. Choose an open month from the overview before uploading.', 'Dieser Monat ist schreibgeschützt. Wählen Sie vor dem Hochladen in der Übersicht einen offenen Monat aus.', 'هذا الشهر للقراءة فقط. اختر شهرًا مفتوحًا من النظرة العامة قبل الرفع.')}
+              </p>
+            )}
+
+            <div className="flex min-h-[140px] flex-col items-center justify-center p-4 text-center sm:min-h-[142px] sm:p-6">
+              <div className="mx-auto grid size-9 place-items-center rounded-md bg-[#4C9AFF] text-white shadow-sm">
+                <FileUp className="size-5" aria-hidden="true" />
+              </div>
+              <p className="mt-2 text-sm font-semibold text-[#0f1f3d]">{dragOver
+                ? t3(lang, 'Drop files to add them', 'Dateien hier ablegen', 'أفلت الملفات لإضافتها')
+                : <><button type="button" disabled={uploadDisabled} onClick={() => fileInput.current?.click()} className="min-h-11 rounded px-1 text-[#0F1B3D] underline decoration-[#B07A2A] underline-offset-2 focus-visible:outline-2 focus-visible:outline-[#0B7F99]">{t3(lang, 'Choose files', 'Dateien auswählen', 'اختر الملفات')}</button><span className="font-normal text-[#4A5468]"> {t3(lang, 'or drop them here', 'oder hier ablegen', 'أو أفلتها هنا')}</span></>}</p>
+              <p className="mt-1 text-xs text-slate-500">{t3(lang, 'PDF, photos, Word, Excel, CSV or text · up to', 'PDF, Fotos, Word, Excel, CSV oder Text · bis zu', 'PDF أو صور أو Word أو Excel أو CSV أو نص · حتى')} {CLIENT_MAX_UPLOAD_BYTES / 1024 / 1024} MB {t3(lang, 'per file', 'pro Datei', 'لكل ملف')}</p>
+              <button type="button" aria-label={t3(lang, 'Take photo', 'Foto aufnehmen', 'التقط صورة')} title={t3(lang, 'Take photo', 'Foto aufnehmen', 'التقط صورة')} disabled={uploadDisabled} onClick={onOpenCamera} className="client-camera-action absolute end-2 top-2 z-10 inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[#E6E0D0] bg-white px-3 text-[#4A5468] hover:border-[#B07A2A] focus-visible:outline-2 focus-visible:outline-[#0B7F99]">
+                <Camera className="size-4" /><span>{t3(lang, 'Take photo', 'Foto aufnehmen', 'التقط صورة')}</span>
+              </button>
+            </div>
+          </motion.div>
+
+          <details className="client-upload-note rounded-xl border border-[#E6E0D0] bg-white px-3">
+            <summary className="flex min-h-11 cursor-pointer items-center text-xs font-semibold text-[#1F2A44]">{t3(lang, 'Add a note (optional)', 'Notiz hinzufügen (optional)', 'أضف ملاحظة (اختياري)')}</summary>
+            <label className="block pb-3 text-start text-[10px] font-semibold uppercase tracking-[.14em] text-slate-500">
+            {t3(lang, 'Note', 'Notiz', 'ملاحظة')}
+            <textarea
+              rows={3}
+              value={uploadNote}
+              onChange={(event) => onUploadNoteChange(event.target.value)}
+              placeholder={t3(lang, 'e.g. Please note the attached leave request…', 'z. B. Urlaubsantrag liegt bei, bitte beachten…', 'مثال: يرجى ملاحظة طلب الإجازة المرفق…')}
+              className="mt-1.5 min-h-20 w-full resize-y rounded-xl border border-[#e8e2d2] bg-[#faf9f6] p-3 text-sm font-normal normal-case tracking-normal text-[#0f1f3d] outline-none placeholder:text-slate-400 focus:border-[#c9a24b]"
+            />
+            </label>
+          </details>
+
+          {activePeriodDocuments.length > 0 && (
+            <details
+              open={queueOpen}
+              onToggle={(event) => setQueueOpen(event.currentTarget.open)}
+              className="rounded-xl border border-[#E6E0D0] bg-white px-3"
+            >
+              <summary className="flex min-h-11 cursor-pointer items-center text-sm font-semibold text-[#0F1B3D]">
+                {t3(lang, 'Your files', 'Ihre Dateien', 'ملفاتك')} <span className="ms-2 text-xs font-normal text-[#4A5468]">({activePeriodDocuments.length})</span>
+              </summary>
+              <ul className="mt-2 divide-y divide-[#E6E0D0]">
+                {activePeriodDocuments.map((item) => {
+                  const isReading = item.status === 'processing';
+                  const isReady = item.clientSaved === false && item.extractedText !== undefined;
+                  const isSent = item.clientSaved === true;
+                  return (
+                    <li key={item.id} id={`client-upload-queue-${item.id}`} className="flex min-w-0 flex-wrap items-center gap-3 py-3">
+                      <span className={`grid size-9 shrink-0 place-items-center rounded-full ${isSent ? 'bg-[#1F8A5B]/10 text-[#1F8A5B]' : isReady ? 'bg-[#D98A1B]/10 text-[#8A5600]' : 'bg-[#0B7F99]/10 text-[#0B7F99]'}`}>
+                        {isSent ? <CheckCircle2 className="client-send-success size-5" /> : isReady ? <FileUp className="size-5" /> : <ProgressBar value={item.processingProgress ?? 0} active />}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block break-words text-sm font-medium text-[#1F2A44]">{item.name}</span>
+                        <span className="mt-0.5 block text-sm text-[#4A5468]" aria-live="polite">
+                          {isSent ? t3(lang, 'Sent', 'Gesendet', 'تم الإرسال') : isReady ? t3(lang, 'Ready to review', 'Bereit zur Prüfung', 'جاهز للمراجعة') : t3(lang, 'Reading', 'Wird gelesen', 'جارٍ القراءة')}
+                        </span>
+                        {isReading && <span className="mt-2 block max-w-xs"><ProgressBar value={item.processingProgress ?? 0} active /></span>}
+                      </span>
+                      {isReading && item.extractedText === undefined && (
+                        <Button size="sm" variant="outline" className="min-h-11 rounded-xl" onClick={() => onCancelUpload(item)}>
+                          {t3(lang, 'Cancel', 'Abbrechen', 'إلغاء')}
+                        </Button>
+                      )}
+                      {isReady && (
+                        <Button size="sm" variant="outline" className="min-h-11 rounded-xl" onClick={() => onReviewDocument?.(item.id)}>
+                          {t3(lang, 'Review', 'Prüfen', 'مراجعة')}
+                        </Button>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </details>
+          )}
+
+          {/* Extracted Review */}
+          {selectedPendingDocument && (
+            <section id="client-extracted-review" className="scroll-mt-24 space-y-4" aria-label="Review extracted documents">
+              <div>
+                <h2 className="font-serif text-lg font-semibold text-[#0f1f3d]">Review your uploaded document</h2>
+                <p className="mt-1 text-sm text-muted">
+                  Check the text and details found in your file. Correct anything that is wrong, then send it to your FinTax team.
+                </p>
+              </div>
+              {[selectedPendingDocument].map((item) => (
+                <ExtractedDocumentReview
+                  key={item.id}
+                  item={item}
+                  storageReady={storageReady}
+                  onSave={onSaveDraft}
+                  onChangeType={onChangeDocumentType}
+                  primarySaveRef={primarySaveRef}
+                  lang={lang}
+                />
+              ))}
+            </section>
+          )}
+        </section>
       </section>
     </>
   );

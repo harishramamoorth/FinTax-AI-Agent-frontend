@@ -87,6 +87,7 @@ export interface StoredDocument {
   fields: DemoFields;
   fieldConfidence: Partial<Record<keyof DemoFields, number>>;
   warnings: string[];
+  clientNote?: string;
   reviewHistory: NonNullable<DemoDocument['reviewHistory']>;
 }
 

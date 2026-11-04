@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { ArrowRight, MessageSquareText, Send, X } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import type { DemoRole } from './demoAccounts';
 
 type Language = 'en' | 'de' | 'ar';
@@ -81,6 +82,13 @@ const TOUR_STEPS: Record<Language, string[]> = {
   ],
 };
 
+const CLIENT_TOUR_DESTINATIONS: Destination[] = [
+  { path: '/client/dashboard', target: 'client-overview' },
+  { path: '/client/dashboard/upload', target: 'client-upload' },
+  { path: '/client/dashboard/documents', target: 'client-documents' },
+  { path: '/client/dashboard', target: 'client-month' },
+];
+
 function guideAnswer(question: string, role: DemoRole, language: Language): { text: string; destination?: Destination } {
   const value = question.toLowerCase();
   const phrases = language === 'de' ? {
@@ -115,7 +123,7 @@ function guideAnswer(question: string, role: DemoRole, language: Language): { te
       : language === 'ar'
         ? '١. افتح الرفع. ٢. اختر نوع المستند والشهر. ٣. اختر ملفاً أو صورة. قد تخطئ قراءة النص المحلية.'
         : '1. Open Upload. 2. Choose a document type and month. 3. Pick a file or photo. Local text recognition can be inaccurate.',
-    destination: { path: '/demo/client/upload', target: 'client-upload' },
+    destination: { path: '/client/dashboard/upload', target: 'client-upload' },
   };
   if (phrases.folders.test(value)) return {
     text: language === 'de'
@@ -123,7 +131,7 @@ function guideAnswer(question: string, role: DemoRole, language: Language): { te
       : language === 'ar'
         ? 'تُنظّم المستندات حسب العميل والسنة والشهر ضمن FiBu وLoBu والمراسلات وAgenda. افتح المستندات للبحث في الأسماء والنصوص المقروءة.'
         : 'Documents are grouped by client, year, and month under FiBu, LoBu, correspondence, or Agenda. Open Documents to search names and extracted text.',
-    destination: { path: '/demo/client/documents', target: 'client-documents' },
+    destination: { path: '/client/dashboard/documents', target: 'client-documents' },
   };
   if (phrases.finish.test(value)) return {
     text: language === 'de'
@@ -131,12 +139,12 @@ function guideAnswer(question: string, role: DemoRole, language: Language): { te
       : language === 'ar'
         ? 'يجب رفع جميع العناصر المطلوبة أو تحديد عدم انطباقها مع سبب. بعد التأكيد يصبح الشهر للقراءة فقط ويظهر في مراجعة الفريق.'
         : 'Required checklist items must be uploaded or marked not applicable with a reason. After confirmation the month becomes read-only and appears in staff review.',
-    destination: { path: '/demo/client', target: 'client-month' },
+    destination: { path: '/client/dashboard', target: 'client-month' },
   };
   if (phrases.review.test(value)) {
     if (role === 'client') return {
       text: language === 'de' ? 'Das FinTax-Team prüft eingereichte Monate, kann Rückfragen senden und den Monat nach der Prüfung freigeben.' : language === 'ar' ? 'يراجع فريق FinTax الأشهر المرسلة، وقد يطلب توضيحات ثم يعتمد الشهر بعد المراجعة.' : 'FinTax staff review submitted months, may request clarification, and can approve the month after review.',
-      destination: { path: '/demo/client', target: 'client-demo-tasks' },
+      destination: { path: '/client/dashboard', target: 'client-month' },
     };
     return {
       text: language === 'de'
@@ -173,10 +181,15 @@ function guideAnswer(question: string, role: DemoRole, language: Language): { te
   };
 }
 
-export default function HelpBot({ role }: { role: DemoRole }) {
+export default function HelpBot({ role, launcherVisible = true, openSignal = 0 }: { role: DemoRole; launcherVisible?: boolean; openSignal?: number }) {
   const reducedMotion = useReducedMotion();
+  const navigate = useNavigate();
+  const location = useLocation();
   const panelRef = useRef<HTMLDivElement>(null);
   const launcherRef = useRef<HTMLButtonElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const pendingDestination = useRef<string | null>(null);
+  const touchStartY = useRef<number | null>(null);
   const [language, setLanguage] = useState<Language>(() => {
     const saved = localStorage.getItem('fintax-language');
     return saved === 'de' || saved === 'ar' ? saved : 'en';
@@ -187,6 +200,23 @@ export default function HelpBot({ role }: { role: DemoRole }) {
   const [messages, setMessages] = useState<HelpMessage[]>([]);
   const text = translations[language];
   const rtl = language === 'ar';
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'nearest' });
+  }, [messages, reducedMotion, tourStep]);
+
+  useEffect(() => {
+    const targetId = pendingDestination.current;
+    if (!targetId) return;
+    pendingDestination.current = null;
+    const frame = window.requestAnimationFrame(() => {
+      const target = document.getElementById(targetId);
+      target?.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'center' });
+      target?.classList.add('helpbot-highlight');
+      window.setTimeout(() => target?.classList.remove('helpbot-highlight'), 2200);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [location.pathname, reducedMotion]);
 
   useEffect(() => {
     const syncLanguage = (event: Event) => {
@@ -237,11 +267,21 @@ export default function HelpBot({ role }: { role: DemoRole }) {
 
   const openGuide = () => {
     setOpen(true);
+    setMessages((current) => current.length
+      ? current
+      : [{ id: crypto.randomUUID(), role: 'guide', text: text.welcome }]);
     if (!localStorage.getItem('fintax-helpbot-seen-v1')) {
-      setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'guide', text: text.welcome }]);
       localStorage.setItem('fintax-helpbot-seen-v1', 'true');
     }
   };
+
+  useEffect(() => {
+    if (openSignal > 0) openGuide();
+  }, [openSignal]);
+
+  useEffect(() => {
+    if (role === 'client') document.dispatchEvent(new CustomEvent('fintax-helpbot-state', { detail: open }));
+  }, [open, role]);
 
   const send = (question: string) => {
     const userText = question.trim();
@@ -253,11 +293,19 @@ export default function HelpBot({ role }: { role: DemoRole }) {
       { id: crypto.randomUUID(), role: 'guide', ...answer },
     ]);
     setDraft('');
+    if (role === 'client' && window.matchMedia('(max-width: 767px)').matches) {
+      window.setTimeout(() => setOpen(false), 3500);
+    }
   };
 
   const startTour = () => {
     setTourStep(0);
-    setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'guide', text: TOUR_STEPS[language][0] }]);
+    setMessages((current) => [...current, {
+      id: crypto.randomUUID(),
+      role: 'guide',
+      text: TOUR_STEPS[language][0],
+      ...(role === 'client' ? { destination: CLIENT_TOUR_DESTINATIONS[0] } : {}),
+    }]);
   };
 
   const nextTourStep = () => {
@@ -265,22 +313,32 @@ export default function HelpBot({ role }: { role: DemoRole }) {
     const next = tourStep + 1;
     if (next >= TOUR_STEPS[language].length) {
       setTourStep(null);
+      setMessages((current) => [...current, {
+        id: crypto.randomUUID(),
+        role: 'guide',
+        text: language === 'de' ? 'Tour abgeschlossen. Wählen Sie eine Frage oder stellen Sie eine weitere Frage zur Bedienung.' : language === 'ar' ? 'اكتملت الجولة. اختر سؤالًا أو اسأل عن استخدام العرض.' : 'Tour complete. Choose a quick question or ask how to use another part of the demo.',
+      }]);
       return;
     }
     setTourStep(next);
-    setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'guide', text: TOUR_STEPS[language][next] }]);
+    setMessages((current) => [...current, {
+      id: crypto.randomUUID(),
+      role: 'guide',
+      text: TOUR_STEPS[language][next],
+      ...(role === 'client' ? { destination: CLIENT_TOUR_DESTINATIONS[next] } : {}),
+    }]);
   };
 
   const navigateTo = (destination: Destination) => {
-    window.dispatchEvent(new CustomEvent('fintax-navigate-workspace', { detail: destination.screen }));
-    window.history.pushState(null, '', destination.path);
-    window.dispatchEvent(new PopStateEvent('popstate'));
-    window.setTimeout(() => {
+    if (location.pathname !== destination.path) {
+      pendingDestination.current = destination.target;
+      navigate(destination.path);
+    } else {
       const target = document.getElementById(destination.target);
       target?.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'center' });
       target?.classList.add('helpbot-highlight');
       window.setTimeout(() => target?.classList.remove('helpbot-highlight'), 2200);
-    }, 350);
+    }
     setOpen(false);
   };
 
@@ -294,23 +352,31 @@ export default function HelpBot({ role }: { role: DemoRole }) {
     : role === 'staff'
       ? language === 'de' ? ['Monatsprüfung öffnen', 'Dokument prüfen', 'Rückfrage senden'] : language === 'ar' ? ['مراجعة الشهر', 'فحص المستند', 'إرسال طلب'] : ['Review a submitted month', 'Check a document', 'Request clarification']
       : language === 'de' ? ['Monatsübersicht öffnen', 'Admin-Ansicht', 'Demo-Rollen'] : language === 'ar' ? ['عرض الأشهر', 'عرض المسؤول', 'أدوار العرض'] : ['View month submissions', 'Admin read-only view', 'Demo roles'];
+  const showClientLauncher = launcherVisible && (role !== 'client' || location.pathname === '/client/dashboard');
 
-  return <>
-    <button ref={launcherRef} type="button" aria-label={text.open} aria-expanded={open} onClick={openGuide}
-      className="helpbot-launcher fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] right-4 z-[70] grid size-14 place-items-center rounded-full bg-gradient-to-br from-violet to-blue text-white shadow-xl shadow-violet/35 transition-transform hover:scale-105 focus-visible:outline-white sm:bottom-6">
-      <MessageSquareText className="size-6" />
+  return <div data-client-portal={role === 'client' ? '' : undefined} className={role === 'client' ? 'client-portal' : undefined}>
+    {showClientLauncher && <button ref={launcherRef} type="button" aria-label={text.open} aria-expanded={open} onClick={openGuide}
+      className={`helpbot-launcher ${role === 'client' ? 'client-helpbot-launcher' : ''} fixed bottom-[calc(5.75rem+env(safe-area-inset-bottom))] right-4 z-[70] grid size-12 place-items-center rounded-full bg-[#0B7F99] text-white shadow-lg shadow-[#0f1f3d]/20 transition-transform hover:scale-105 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c9a24b] sm:bottom-6`}>
+      {role === 'client' ? <span aria-hidden="true" className="text-xl font-semibold">?</span> : <MessageSquareText className="size-6" />}
       {!localStorage.getItem('fintax-helpbot-seen-v1') && <span className="absolute -right-0.5 -top-0.5 size-3 rounded-full border-2 border-white bg-amber-400" />}
       <span className="sr-only">{text.open}</span>
-    </button>
+    </button>}
     <AnimatePresence>
       {open && <>
         <div className="fixed inset-0 z-[69] bg-black/10 md:bg-transparent" aria-hidden onClick={() => setOpen(false)} />
         <motion.section ref={panelRef} role="dialog" aria-modal="true" aria-labelledby="helpbot-title" dir={rtl ? 'rtl' : 'ltr'}
+          onTouchStart={(event) => { touchStartY.current = event.touches[0]?.clientY ?? null; }}
+          onTouchEnd={(event) => {
+            const startY = touchStartY.current;
+            const endY = event.changedTouches[0]?.clientY;
+            touchStartY.current = null;
+            if (startY !== null && endY !== undefined && endY - startY > 80) setOpen(false);
+          }}
           initial={reducedMotion ? false : { opacity: 0, y: 18, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={reducedMotion ? undefined : { opacity: 0, y: 18, scale: 0.98 }}
           transition={{ duration: reducedMotion ? 0 : 0.18 }}
-          className="fixed inset-x-0 bottom-0 z-[71] flex h-[min(92dvh,720px)] flex-col overflow-hidden rounded-t-3xl border border-white/80 bg-white shadow-2xl md:inset-x-auto md:bottom-24 md:right-5 md:h-[560px] md:w-[380px] md:rounded-3xl">
-          <header className="flex items-center gap-3 border-b border-ink/10 bg-gradient-to-r from-violet/5 to-blue/5 px-4 py-3">
-            <span className="grid size-9 place-items-center rounded-xl bg-gradient-to-br from-violet to-blue text-white"><MessageSquareText className="size-4" /></span>
+          className={`helpbot-panel fixed inset-x-0 bottom-0 z-[71] flex h-[min(92dvh,720px)] flex-col overflow-hidden rounded-t-3xl border border-[#e8e2d2] bg-white shadow-2xl md:inset-x-auto md:bottom-24 md:right-5 md:h-[560px] md:w-[380px] md:rounded-3xl ${role === 'client' ? 'client-helpbot-panel' : ''}`}>
+          <header className="flex items-center gap-3 border-b border-[#e8e2d2] bg-[#f7f4ec] px-4 py-3">
+            <span className="grid size-9 place-items-center rounded-xl bg-[#0f1f3d] text-white"><MessageSquareText className="size-4" /></span>
             <div className="min-w-0 flex-1"><h2 id="helpbot-title" className="truncate text-sm font-semibold text-ink">{text.title}</h2><p className="text-[10px] text-muted">{text.subtitle}</p></div>
             <label className="sr-only" htmlFor="helpbot-language">Help language</label>
             <select id="helpbot-language" value={language} onChange={(event) => {
@@ -326,22 +392,23 @@ export default function HelpBot({ role }: { role: DemoRole }) {
             <button type="button" aria-label={text.close} onClick={() => setOpen(false)} className="grid size-10 place-items-center rounded-full text-muted hover:bg-ink/5"><X className="size-4" /></button>
           </header>
           <div className="flex-1 space-y-3 overflow-y-auto p-4" aria-live="polite" aria-label="Help conversation">
-            {!messages.length && <div className="rounded-2xl bg-violet/5 p-3 text-xs leading-5 text-ink">{text.welcome}</div>}
-            {messages.map((message) => <div key={message.id} className={`max-w-[90%] rounded-2xl px-3 py-2.5 text-xs leading-5 ${message.role === 'user' ? 'ms-auto bg-violet text-white' : 'me-auto bg-bg/70 text-ink'}`}>
+            {!messages.length && <div className="max-w-[95%] rounded-2xl bg-[#f7f4ec] p-4 text-sm leading-6 text-[#0f1f3d]">{text.welcome}</div>}
+            {messages.map((message) => <div key={message.id} className={`max-w-[90%] rounded-2xl px-4 py-3 text-sm leading-6 ${message.role === 'user' ? 'ms-auto bg-[#0f1f3d] text-white' : 'me-auto bg-[#f7f4ec] text-[#0f1f3d]'}`}>
               <p>{message.text}</p>
-              {message.destination && <button type="button" onClick={() => navigateTo(message.destination!)} className="mt-2 inline-flex min-h-9 items-center gap-1.5 rounded-full bg-violet px-3 text-[11px] font-medium text-white hover:bg-blue">{text.takeMe}<ArrowRight className="size-3.5" /></button>}
+              {message.destination && <button type="button" onClick={() => navigateTo(message.destination!)} className="mt-3 inline-flex min-h-10 items-center gap-1.5 rounded-full bg-[#0f1f3d] px-4 text-xs font-medium text-white hover:bg-[#1b3160]">{text.takeMe}<ArrowRight className="size-3.5" /></button>}
             </div>)}
-            {tourStep === null && <button type="button" onClick={startTour} className="rounded-full border border-violet/20 px-3 py-2 text-[11px] font-medium text-violet">{text.startTour}</button>}
-            {tourStep !== null && <div className="flex gap-2"><button type="button" onClick={nextTourStep} className="rounded-full bg-violet px-3 py-2 text-[11px] font-medium text-white">{text.next}</button><button type="button" onClick={() => setTourStep(null)} className="rounded-full border border-ink/10 px-3 py-2 text-[11px] text-muted">{text.dismiss}</button></div>}
-            <div className="flex flex-wrap gap-2">{quickReplies.map((reply) => <button key={reply} type="button" onClick={() => send(reply)} className="min-h-9 rounded-full border border-ink/10 bg-white px-3 text-[10px] text-ink hover:border-violet/30 hover:bg-violet/5">{reply}</button>)}</div>
+            <div ref={messagesEndRef} />
+            {tourStep === null && <button type="button" onClick={startTour} className="min-h-11 rounded-full border border-[#c9a24b]/50 px-4 text-sm font-medium text-[#765b1e] hover:bg-[#fbf7ea]">{text.startTour}</button>}
+            {tourStep !== null && <div className="flex flex-wrap gap-2"><button type="button" onClick={nextTourStep} className="min-h-10 rounded-full bg-[#0f1f3d] px-4 text-xs font-medium text-white">{text.next} ({tourStep + 1}/4)</button><button type="button" onClick={() => setTourStep(null)} className="min-h-10 rounded-full border border-[#e8e2d2] px-4 text-xs text-muted">{text.dismiss}</button></div>}
+            <div className={role === 'client' ? 'client-helpbot-quick-replies flex gap-2' : 'flex flex-wrap gap-2'}>{quickReplies.map((reply) => <button key={reply} type="button" onClick={() => send(reply)} className="min-h-10 shrink-0 rounded-full border border-[#e8e2d2] bg-white px-4 text-xs text-[#263858] hover:border-[#c9a24b] hover:bg-[#fbf7ea]">{reply}</button>)}</div>
           </div>
-          <form onSubmit={onSubmit} className="flex items-center gap-2 border-t border-ink/10 p-3">
+          <form onSubmit={onSubmit} className="flex items-center gap-2 border-t border-[#e8e2d2] bg-white p-3 pb-[max(12px,env(safe-area-inset-bottom))]">
             <input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={text.placeholder} aria-label={text.placeholder}
-              className="min-h-11 min-w-0 flex-1 rounded-full border border-ink/10 bg-white px-4 text-xs text-ink" />
-            <button type="submit" disabled={!draft.trim()} aria-label={text.send} className="grid size-11 shrink-0 place-items-center rounded-full bg-gradient-to-br from-violet to-blue text-white disabled:opacity-40"><Send className="size-4" /></button>
+              className="min-h-12 min-w-0 flex-1 rounded-full border border-[#e8e2d2] bg-white px-4 text-sm text-[#0f1f3d] outline-none focus:border-[#c9a24b]" />
+            <button type="submit" disabled={!draft.trim()} aria-label={text.send} className="grid size-12 shrink-0 place-items-center rounded-full bg-[#0f1f3d] text-white transition-colors hover:bg-[#1b3160] disabled:opacity-40"><Send className="size-4" /></button>
           </form>
         </motion.section>
       </>}
     </AnimatePresence>
-  </>;
+  </div>;
 }

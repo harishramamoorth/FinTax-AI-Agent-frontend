@@ -36,6 +36,8 @@ export interface DemoDocument {
   id: string;
   name: string;
   category: DemoCategory;
+  area?: 'formation' | 'payroll' | 'accounting' | 'correspondence';
+  previousVersions?: { id: string; name: string; uploadedAt: string; sizeBytes: number }[];
   periodId?: string;
   folder?: string;
   mime?: string;
@@ -57,8 +59,9 @@ export interface DemoDocument {
   validationWarnings?: string[];
   extractedDetails?: Record<string, string>;
   reviewHistory?: { at: string; action: string; details: string }[];
-  clientRequest?: { reason: string; createdAt: string; response?: string; resolvedAt?: string };
+  clientRequest?: { reason: string; createdAt: string; response?: string; resolvedAt?: string; status?: 'pending_review' };
   note?: string;
+  clientNote?: string;
   file?: File;
   extractedText?: string;
   pageCount?: number;
@@ -86,10 +89,14 @@ const acceptedTypes = new Set([
   'text/csv', 'text/plain', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 ]);
 export const MAX_DEMO_FILE_BYTES = 50 * 1024 * 1024;
+export const CLIENT_MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 
-export function validateDemoFile(file: Pick<File, 'name' | 'size' | 'type'>): string | null {
+export function validateDemoFile(
+  file: Pick<File, 'name' | 'size' | 'type'>,
+  maxFileBytes = MAX_DEMO_FILE_BYTES,
+): string | null {
   if (file.size === 0) return 'This file is empty.';
-  if (file.size > MAX_DEMO_FILE_BYTES) return 'Files must be 50 MB or smaller.';
+  if (file.size > maxFileBytes) return `Files must be ${maxFileBytes / 1024 / 1024} MB or smaller.`;
   const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
   const supportedType = acceptedTypes.has(file.type.toLowerCase());
   if (!acceptedExtensions.has(extension) && !supportedType) {
@@ -111,7 +118,8 @@ export function categoryForFilename(name: string, text = ''): DemoCategory {
   if (/\b(?:employee|staff|mitarbeiter)\b/.test(value)) return 'employee_record';
   if (/\b(?:commercial register|handelsregister|register extract)\b/.test(value)) return 'commercial_register';
   if (/\b(?:company formation|formation|gründung)\b/.test(value)) return 'company_formation';
-  if (/\b(?:contract|vertrag)\b/.test(value)) return 'contract';
+  if (/\b(?:lease|rental|mietvertrag)\b/.test(value)) return 'other_correspondence';
+  if (/\b(?:contract|vertrag|gesellschaftsvertrag|articles of association|partnership deed)\b/.test(value)) return 'contract';
   if (/\b(?:tax office|finanzamt)\b/.test(value)) return 'correspondence';
   if (/\b(?:correspondence|letter|brief)\b/.test(value)) return 'other_correspondence';
   if (/\b(?:passport|identity|emirates|ausweis|id card)\b/.test(value)) return 'identity_document';
@@ -181,8 +189,13 @@ export function extractDemoFields(text: string): { fields: DemoFields; confidenc
     }
   }
   const referenceMatch = text.match(/(?:invoice\s*(?:no\.?|number)|rechnungsnummer|rechnung(?:s-?nr\.?)|beleg(?:nummer|nr\.?)|reference|referenz)\s*[:#]?\s*([A-Z0-9][A-Z0-9/_-]{2,})/i);
-  const counterpartyLine = text.split(/\r?\n/).map((line) => line.trim()).find((line) =>
-    line.length >= 3 && line.length <= 100 && !/^(invoice|rechnung|date|datum|total|summe|brutto|netto|vat|mwst|ust)\b/i.test(line),
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const legalEntityLine = lines.find((line) => line.length <= 120
+    && /\b(?:GmbH\s*&\s*Co\.?\s*KG|GmbH|AG|UG(?:\s*\(haftungsbeschränkt\))?|KG|OHG|GbR|e\.?\s*K\.?)\b/i.test(line)
+    && !/^(?:gesellschaftsvertrag|articles? of association|partnership deed)\b/i.test(line));
+  const counterpartyLine = legalEntityLine ?? lines.find((line) =>
+    line.length >= 3 && line.length <= 100
+    && !/^(?:invoice|rechnung|date|datum|total|summe|brutto|netto|vat|mwst|ust|gesellschaftsvertrag|articles? of association|partnership deed|§|\d+\s*\.?)/i.test(line),
   ) ?? '';
   const netAmount = amountFromText(text, 'net(?: amount)?|netto(?:betrag)?');
   const vatAmount = amountFromText(text, 'vat(?: amount)?|mwst(?:\\.?betrag)?|ust(?:\\.?betrag)?|tax amount');
@@ -206,6 +219,50 @@ export function extractDemoFields(text: string): { fields: DemoFields; confidenc
   };
 }
 
+function firstLabeledValue(text: string, labels: string): string {
+  const match = text.match(new RegExp(`(?:^|[\\r\\n])\\s*(?:${labels})(?=\\s|[:#-]|$)\\s*(?:[:#]|[-–])?\\s*([^\\r\\n]{1,120})`, 'i'));
+  return match?.[1]?.trim() ?? '';
+}
+
+function legalEntityFromText(text: string): string {
+  const entityPattern = /\b(?:GmbH\s*&\s*Co\.?\s*KG|GmbH|AG|UG(?:\s*\(haftungsbeschränkt\))?|KG|OHG|GbR|e\.?\s*K\.?)\b/i;
+  return text.split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length <= 120 && entityPattern.test(line)
+      && !/^(?:gesellschaftsvertrag|articles? of association|partnership deed)\b/i.test(line))
+    ?? '';
+}
+
+export function extractDocumentFields(category: DemoCategory, text: string, fileName = ''): { fields: DemoFields; confidence: number } {
+  const extracted = extractDemoFields(text);
+  const fields = { ...extracted.fields };
+  if (category === 'company_formation' || category === 'commercial_register' || category === 'contract') {
+    const fileTitle = fileName.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim();
+    const legalEntity = legalEntityFromText(text)
+      || (/\b(?:GmbH|AG|UG|KG|OHG|GbR|e\.?\s*K\.?)\b/i.test(fileTitle) ? fileTitle : '');
+    const reference = text.match(/\b(?:HRB|HRA)\s*\d{2,}(?:\s+[A-Z]\d+)?\b/i)?.[0]
+      ?? firstLabeledValue(text, 'register number|registration number|handelsregisternummer|reference|referenz|aktenzeichen');
+    const effectiveDate = firstLabeledValue(text, 'effective date|formation date|date of formation|contract date|vertragsbeginn|gründungsdatum|datum der gründung');
+    const title = text.split(/\r?\n/).map((line) => line.trim()).find((line) =>
+      /gesellschaftsvertrag|articles of association|partnership deed|shareholders agreement|gesellschaftsgründung/i.test(line),
+    ) ?? '';
+
+    fields.counterparty = legalEntity || fields.counterparty;
+    fields.reference = reference || fields.reference;
+    fields.documentDate = effectiveDate || fields.documentDate;
+    fields.description = title || fields.description;
+  }
+
+  const valuesToCount = category === 'company_formation' || category === 'commercial_register' || category === 'contract'
+    ? [fields.counterparty, fields.reference, fields.documentDate, fields.description]
+    : [fields.documentDate, fields.counterparty, fields.reference, fields.netAmount, fields.vatAmount, fields.grossAmount];
+  const valueCount = valuesToCount.filter(Boolean).length;
+  return {
+    fields,
+    confidence: valueCount ? Math.min(0.85, 0.25 + valueCount * 0.1) : 0,
+  };
+}
+
 export function detectDocumentLanguage(text: string): string {
   if (!text.trim()) return 'Not detected · manual review needed';
   if (/[\u0600-\u06ff]/.test(text)) return 'Arabic script detected · manual review needed';
@@ -216,7 +273,7 @@ export function detectDocumentLanguage(text: string): string {
 
 export function extractDocumentDetails(category: DemoCategory, text: string): Record<string, string> {
   if (!text.trim()) return {};
-  const labeledValue = (labels: string) => text.match(new RegExp(`(?:${labels})\\s*[:#]?\\s*([^\\r\\n]{1,100})`, 'i'))?.[1]?.trim() ?? '';
+  const labeledValue = (labels: string) => firstLabeledValue(text, labels);
   if (category === 'bank_statement') {
     const transactions = text.split(/\r?\n/).map((line) => {
       const date = line.match(/\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b/)?.[0];
@@ -234,6 +291,7 @@ export function extractDocumentDetails(category: DemoCategory, text: string): Re
       };
     }).filter((item): item is NonNullable<typeof item> => item !== null).slice(0, 5);
     return {
+      'Statement period': labeledValue('statement period|statement date|period|abrechnungszeitraum|zeitraum'),
       'Opening balance': labeledValue('opening balance|anfangssaldo|anfangsbestand'),
       'Closing balance': labeledValue('closing balance|end balance|schlusssaldo|endsaldo'),
       ...Object.fromEntries(transactions.map((transaction, index) => [
@@ -251,11 +309,33 @@ export function extractDocumentDetails(category: DemoCategory, text: string): Re
       'Gross amount (candidate)': labeledValue('gross pay|gross salary|bruttoverdienst|bruttogehalt'),
     };
   }
-  if (category === 'company_formation' || category === 'commercial_register' || category === 'contract') {
+  if (category === 'company_formation') {
     return {
-      'Organization / counterparty (candidate)': labeledValue('company|company name|firma|gesellschaft|party|vertragspartei'),
-      'Reference (candidate)': labeledValue('register number|registration number|handelsregisternummer|reference|aktenzeichen'),
-      'Effective date (candidate)': labeledValue('effective date|formation date|vertragsbeginn|gründungsdatum'),
+      'Company name': labeledValue('company name|company|firma|gesellschaft') || legalEntityFromText(text),
+      'Registered office': labeledValue('registered office|registered address|registered seat|geschäftssitz|sitz der gesellschaft|sitz'),
+      'Share capital': labeledValue('share capital|capital stock|stammkapital|grundkapital'),
+      Shareholders: labeledValue('shareholders|shareholder|gesellschafter|gesellschafterin'),
+      'Managing director': labeledValue('managing director|geschäftsführer|geschäftsführerin|director'),
+      Date: labeledValue('effective date|formation date|date of formation|contract date|gründungsdatum|datum der gründung|date|datum'),
+    };
+  }
+  if (category === 'commercial_register') {
+    const reference = text.match(/\b(?:HRB|HRA)\s*\d{2,}(?:\s+[A-Z]\d+)?\b/i)?.[0]
+      ?? labeledValue('register number|registration number|handelsregisternummer|reference|referenz|aktenzeichen');
+    return {
+      'HRB number': reference,
+      Court: labeledValue('registration court|register court|court|registergericht|amtsgericht'),
+      Company: labeledValue('company name|company|firma|gesellschaft') || legalEntityFromText(text),
+      Date: labeledValue('registration date|date|eintragungsdatum|datum'),
+    };
+  }
+  if (category === 'contract') {
+    const reference = text.match(/\b(?:HRB|HRA)\s*\d{2,}(?:\s+[A-Z]\d+)?\b/i)?.[0]
+      ?? labeledValue('reference|referenz|aktenzeichen');
+    return {
+      'Organization / counterparty (candidate)': legalEntityFromText(text) || labeledValue('company name|company|firma|gesellschaft|party|vertragspartei'),
+      'Reference (candidate)': reference,
+      'Effective date (candidate)': labeledValue('effective date|formation date|date of formation|contract date|vertragsbeginn|gründungsdatum|datum der gründung'),
     };
   }
   if (category === 'correspondence' || category === 'other_correspondence') {
@@ -267,7 +347,11 @@ export function extractDocumentDetails(category: DemoCategory, text: string): Re
     };
   }
   if (category === 'identity_document') {
-    return { 'Identity document review': 'Sensitive identity fields are not extracted in this demo. Staff must inspect the original manually.' };
+    return {
+      Name: labeledValue('name|full name|holder|cardholder|inhaber|vorname und nachname'),
+      'Document number': labeledValue('document number|document no|passport number|passport no|id number|ausweisnummer|passnummer'),
+      'Expiry date': labeledValue('expiry date|expiration date|valid until|gültig bis|ablaufdatum'),
+    };
   }
   return {};
 }

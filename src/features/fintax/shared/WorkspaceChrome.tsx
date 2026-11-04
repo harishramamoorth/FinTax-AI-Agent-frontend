@@ -5,7 +5,7 @@ import {
   LogOut, Plus, X, type LucideIcon,
 } from 'lucide-react';
 import type { DemoDocument } from './demoWorkflow';
-import fintaxLogo from './image.png';
+import fintaxLogo from './fintax-logo.png';
 
 export interface NavEntry<Id extends string = string> {
   id: Id;
@@ -98,7 +98,7 @@ export function NavDrawer<Id extends string>({
           className="fixed inset-y-0 start-0 z-50 flex w-[min(20rem,88vw)] flex-col border-e hairline bg-bg2 p-4 shadow-2xl lg:hidden"
         >
           <div className="flex items-center gap-3 border-b hairline pb-4">
-            <span className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-white bg-white shadow-sm"><img src={fintaxLogo} alt="FinTax logo" className="size-full object-contain p-0.5" /></span>
+            <img src={fintaxLogo} alt="FinTax Consulting" className="brand-logo h-auto w-32 shrink-0 object-contain" />
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold">{userName}</p>
               <p className="text-xs text-muted">{roleLabel} demo user</p>

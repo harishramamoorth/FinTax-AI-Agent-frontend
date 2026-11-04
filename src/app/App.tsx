@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
-import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { ErrorBoundary } from './ErrorBoundary';
-import { Toaster } from '@/components/ui/overlays';
 import { AppShell } from '@/components/layout/AppShell';
 import FinTaxDashboard from '@/features/fintax/shared/FinTaxDashboard';
 import DocumentsPage from '@/features/fintax/shared/DocumentsPage';
@@ -11,10 +10,12 @@ import RoleLoginPage from '@/features/fintax/shared/RoleLoginPage';
 import ClientWorkspace from '@/features/fintax/client/ClientWorkspace';
 import AdminWorkspace from '@/features/fintax/admin/AdminWorkspace';
 import StaffWorkspace from '@/features/fintax/staff/StaffWorkspace';
-import HelpBot from '@/features/fintax/shared/HelpBot';
-import { DEMO_ACCOUNTS, type DemoRole } from '@/features/fintax/shared/demoAccounts';
+import { type DemoRole } from '@/features/fintax/shared/demoAccounts';
+import { clearDemoSession, readDemoSession, saveDemoSession, type DemoSession } from '@/features/fintax/shared/demoAuth';
+import PrivacyNotice from '@/features/fintax/shared/PrivacyNotice';
+import { recordPrivacyConsent } from '@/features/fintax/shared/privacyConsent';
+import { portalText, usePortalLanguage } from '@/features/fintax/shared/portalLanguage';
 import { useUiStore } from '@/stores/uiStore';
-import { useDemoDocumentsStore } from '@/stores/demoDocumentsStore';
 import { api } from '@/services/api';
 
 const queryClient = new QueryClient();
@@ -30,110 +31,186 @@ function ThemeSync() {
   return null;
 }
 
+function roleHome(role: DemoRole): string {
+  if (role === 'client') return '/client/dashboard';
+  if (role === 'staff') return '/staff/dashboard';
+  return '/admin/dashboard';
+}
+
+function roleLogin(role: DemoRole): string {
+  if (role === 'client') return '/login';
+  if (role === 'staff') return '/admin/staff';
+  return '/admin/super-admin';
+}
+
 function AppRoutes() {
-  const apiPortalAtRoot = import.meta.env.PROD && import.meta.env.VITE_API_PORTAL_ENABLED === 'true';
-  const apiPortalPath = apiPortalAtRoot ? '/' : '/portal';
-  const [selectedRole, setSelectedRole] = useState<DemoRole | null>(null);
-  const [navigationError, setNavigationError] = useState('');
   const navigate = useNavigate();
   const location = useLocation();
-  const hydrateDemoStorage = useDemoDocumentsStore((state) => state.hydrateStorage);
-  const startDemoStorageSync = useDemoDocumentsStore((state) => state.startStorageSync);
-
-  useEffect(() => {
-    void hydrateDemoStorage();
-    return startDemoStorageSync();
-  }, [hydrateDemoStorage, startDemoStorageSync]);
-
-  const continueAsDemoUser = (role: DemoRole) => {
-    if (!DEMO_ACCOUNTS.some((account) => account.role === role)) {
-      setNavigationError('That demo account is not available. Please choose Admin, Staff, or Client.');
-      return;
-    }
+  const [session, setSession] = useState<DemoSession | null>(() => {
     try {
-      const account = DEMO_ACCOUNTS.find((item) => item.role === role);
-      if (account) useDemoDocumentsStore.getState().recordPeriodAudit('login', account.email, 'Entered the browser-only demo workspace.', account.name, role);
-      setSelectedRole(role);
-      setNavigationError('');
-      navigate(`/demo/${role}`, { state: { demoRole: role } });
+      return readDemoSession();
     } catch {
-      setNavigationError('We could not open that demo dashboard. Please select the role and try again.');
+      return null;
     }
+  });
+
+  const login = (nextSession: DemoSession) => {
+    saveDemoSession(nextSession);
+    setSession(nextSession);
+    navigate(roleHome(nextSession.role), { replace: true });
   };
 
   const logout = () => {
-    if (selectedRole) {
-      const account = DEMO_ACCOUNTS.find((item) => item.role === selectedRole);
-      useDemoDocumentsStore.getState().recordPeriodAudit('login', account?.email ?? 'demo-session', 'Signed out of the browser-only demo workspace.', account?.name ?? 'Demo user', selectedRole);
-    }
-    setSelectedRole(null);
-    setNavigationError('');
-    navigate('/demo', { replace: true });
+    clearDemoSession();
+    setSession(null);
+    navigate(roleLogin(session?.role ?? 'client'), { replace: true });
   };
 
-  const routeError = (location.state as { error?: string } | null)?.error ?? navigationError;
-  const resetRoleSelection = (role: DemoRole | null) => {
-    setSelectedRole(role);
-    setNavigationError('');
-    if (location.state) navigate('/demo', { replace: true, state: null });
-  };
-
-  const helpRole: DemoRole = location.pathname.includes('/admin') ? 'admin' : location.pathname.includes('/staff') ? 'staff' : 'client';
-  const isDemoRoute = location.pathname.startsWith('/demo');
+  const loginElement = (portal: 'client' | 'staff' | 'admin', showPortalOptions = true) => (
+    session
+      ? <Navigate to={roleHome(session.role)} replace />
+      : (
+        <RoleLoginPage
+          portal={portal}
+          showPortalOptions={showPortalOptions}
+          onPortalSwitch={(selected) => {
+            if (selected === 'client') navigate('/login');
+            else if (selected === 'staff') navigate('/admin/staff');
+            else navigate('/admin/super-admin');
+          }}
+          onLogin={login}
+        />
+      )
+  );
 
   return (
-    <>
-      <Routes>
-        <Route path={apiPortalPath} element={<AppShell />}>
-          <Route index element={<FinTaxDashboard />} />
-          <Route path="documents" element={<DocumentsPage />} />
-          <Route path="clients" element={<StaffClientsPage />} />
-          <Route path="*" element={<Navigate to={apiPortalPath} replace />} />
-        </Route>
-        {!apiPortalAtRoot && <Route path="/" element={<Navigate to="/demo/client" replace />} />}
-        <Route path="/demo" element={
-          <RoleLoginPage
-            error={routeError}
-            onSelectRole={resetRoleSelection}
-            onContinue={continueAsDemoUser}
+    <Routes>
+      <Route path="/" element={loginElement('client', false)} />
+      <Route path="/login" element={loginElement('client', false)} />
+      <Route path="/admin" element={loginElement('admin', true)} />
+      <Route path="/admin/staff" element={loginElement('staff', true)} />
+      <Route path="/admin/super-admin" element={loginElement('admin', true)} />
+
+      <Route
+        path="/client/dashboard/*"
+        element={
+          <ProtectedDashboard
+            role="client"
+            session={session}
+            onSignOut={logout}
+            onPrivacyAccepted={(nextSession) => {
+              saveDemoSession(nextSession);
+              setSession(nextSession);
+            }}
           />
-        } />
-        <Route path="/demo/login" element={<Navigate to="/demo" replace />} />
-        <Route path="/demo/:role/*" element={<RoleDashboard selectedRole={selectedRole} onSignOut={logout} />} />
-        <Route path="/demo/*" element={<Navigate to="/demo" replace state={{ error: 'That demo page was not found. Choose a demo role to continue.' }} />} />
-      </Routes>
-      {isDemoRoute && <HelpBot role={helpRole} />}
-      {isDemoRoute && <Toaster />}
-    </>
+        }
+      />
+      <Route
+        path="/staff/dashboard"
+        element={
+          <ProtectedDashboard
+            role="staff"
+            session={session}
+            onSignOut={logout}
+            onPrivacyAccepted={(nextSession) => {
+              saveDemoSession(nextSession);
+              setSession(nextSession);
+            }}
+          />
+        }
+      />
+      <Route
+        path="/admin/dashboard"
+        element={
+          <ProtectedDashboard
+            role="admin"
+            session={session}
+            onSignOut={logout}
+            onPrivacyAccepted={(nextSession) => {
+              saveDemoSession(nextSession);
+              setSession(nextSession);
+            }}
+          />
+        }
+      />
+      <Route path="/client/*" element={<Navigate to={session?.role === 'client' ? roleHome('client') : session ? roleHome(session.role) : '/login'} replace />} />
+      <Route path="/staff/*" element={<Navigate to={session?.role === 'staff' ? roleHome('staff') : session ? roleHome(session.role) : '/admin/staff'} replace />} />
+      <Route path="/admin/*" element={<Navigate to={session ? roleHome(session.role) : '/admin'} replace />} />
+
+      <Route path="/portal" element={<AppShell />}>
+        <Route index element={<FinTaxDashboard />} />
+        <Route path="documents" element={<DocumentsPage />} />
+        <Route path="clients" element={<StaffClientsPage />} />
+        <Route path="*" element={<Navigate to="/portal" replace />} />
+      </Route>
+      <Route path="/demo/*" element={<Navigate to={session ? roleHome(session.role) : '/login'} replace />} />
+      <Route path="*" element={<Navigate to={session ? roleHome(session.role) : location.pathname.startsWith('/portal') ? '/portal' : '/'} replace />} />
+    </Routes>
   );
+}
+
+function ProtectedDashboard({
+  role,
+  session,
+  onSignOut,
+  onPrivacyAccepted,
+}: {
+  role: DemoRole;
+  session: DemoSession | null;
+  onSignOut: () => void;
+  onPrivacyAccepted: (session: DemoSession) => void;
+}) {
+  const [privacyError, setPrivacyError] = useState('');
+  const language = usePortalLanguage((state) => state.language);
+  const setLanguage = usePortalLanguage((state) => state.setLanguage);
+
+  if (!session) return <Navigate to={roleLogin(role)} replace state={{ from: roleHome(role) }} />;
+  if (session.role !== role) return <Navigate to={roleHome(session.role)} replace />;
+
+  if (role === 'client' && !session.privacyAccepted) {
+    return (
+      <PrivacyNotice
+        language={language}
+        onLanguageChange={setLanguage}
+        firm={session.advisorFirm ?? 'FinTax Consulting'}
+        demo
+        requireEveryLogin={false}
+        error={privacyError}
+        onAccept={() => {
+          try {
+            recordPrivacyConsent(`demo:${session.email}`, true, {
+              firm: session.advisorFirm ?? 'FinTax Consulting',
+              textVersion: '1.0.0',
+            });
+            onPrivacyAccepted({ ...session, privacyAccepted: true });
+            setPrivacyError('');
+          } catch {
+            setPrivacyError(portalText(language, 'privacyStorageError'));
+          }
+        }}
+        onDecline={onSignOut}
+      />
+    );
+  }
+
+  if (role === 'client') {
+    return (
+      <ClientWorkspace
+        clientEmail={session.email}
+        advisorFirm={session.advisorFirm}
+        advisorId={session.advisorId}
+        onSignOut={onSignOut}
+      />
+    );
+  }
+  if (role === 'staff') return <StaffWorkspace userName={session.userName} onSignOut={onSignOut} />;
+  return <AdminWorkspace userName={session.userName} onSignOut={onSignOut} />;
 }
 
 function StaffClientsPage() {
   const account = useQuery({ queryKey: ['fintax-user'], queryFn: api.me, staleTime: 30_000 });
-  if (account.data?.user.role === 'client') return <Navigate to="/" replace />;
+  if (account.data?.user.role === 'client') return <Navigate to="/portal" replace />;
   return <ClientsPage />;
-}
-
-function RoleDashboard({ selectedRole, onSignOut }: { selectedRole: DemoRole | null; onSignOut: () => void }) {
-  const { role } = useParams();
-  const location = useLocation();
-  const navigationRole = (location.state as { demoRole?: DemoRole } | null)?.demoRole;
-  const activeRole = selectedRole ?? navigationRole ?? role;
-  if (role !== 'admin' && role !== 'staff' && role !== 'client') {
-    return <Navigate to="/demo" replace state={{ error: 'That demo role is not available. Choose Admin, Staff, or Client.' }} />;
-  }
-  if (activeRole !== role) {
-    return <Navigate to="/demo" replace state={{ error: 'Please choose a demo role before opening a dashboard.' }} />;
-  }
-
-  const account = DEMO_ACCOUNTS.find((demoAccount) => demoAccount.role === activeRole);
-  if (!account) {
-    return <Navigate to="/demo" replace state={{ error: 'That demo account is not available. Please select another role.' }} />;
-  }
-
-  if (role === 'client') return <ClientWorkspace clientEmail={account.email} onSignOut={onSignOut} />;
-  if (role === 'admin') return <AdminWorkspace userName={account.name} onSignOut={onSignOut} />;
-  return <StaffWorkspace userName={account.name} onSignOut={onSignOut} />;
 }
 
 export default function App() {

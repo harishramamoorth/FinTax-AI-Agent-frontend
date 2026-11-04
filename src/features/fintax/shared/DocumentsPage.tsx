@@ -6,7 +6,7 @@ import { api, ApiError } from '@/services/api';
 import { Button, Field, Input, Panel } from '@/components/ui/primitives';
 import type { FinTaxDocument } from '@/types/api';
 import type { LocalDocumentExtraction, OcrLanguage } from '../client/processDocument';
-import { portalCategory, portalExtractionNote, portalText, usePortalLanguage } from './portalLanguage';
+import { portalCategory, portalExtractionNote, portalText, usePortalLanguage, type PortalLanguage } from './portalLanguage';
 
 const CATEGORIES = [
   ['company_formation', 'Company formation'],
@@ -186,7 +186,7 @@ export default function DocumentsPage() {
   );
 }
 
-function DocumentRow({ item, category, clientName, language }: { item: FinTaxDocument; category: string; clientName?: string; language: 'en' | 'de' | 'ar' }) {
+function DocumentRow({ item, category, clientName, language }: { item: FinTaxDocument; category: string; clientName?: string; language: PortalLanguage }) {
   const t = (key: Parameters<typeof portalText>[1]) => portalText(language, key);
   return (
     <li className="flex flex-wrap items-center gap-3 px-5 py-4">

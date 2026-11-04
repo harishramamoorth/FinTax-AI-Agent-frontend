@@ -1,0 +1,18 @@
+{
+  "name": "FinTax Client Portal",
+  "short_name": "FinTax",
+  "description": "FinTax client documents and monthly tasks.",
+  "start_url": "/client/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F7F4EC",
+  "theme_color": "#F7F4EC",
+  "icons": [
+    {
+      "src": "/fintax-logo.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

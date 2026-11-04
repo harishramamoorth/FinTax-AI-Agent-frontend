@@ -99,6 +99,7 @@ function storedDocumentFromDemo(document: DemoDocument): StoredDocument {
       creditAccount: fields.creditAccount ? confidence : undefined,
     },
     warnings: document.validationWarnings ?? [],
+    clientNote: document.clientNote,
     reviewHistory: document.reviewHistory ?? [],
   };
 }

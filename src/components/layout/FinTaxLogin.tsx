@@ -1,13 +1,14 @@
 import { useState, type ReactNode } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Building2, BriefcaseBusiness, FileText, KeyRound, Languages, LockKeyhole, ShieldCheck } from 'lucide-react';
+import { Building2, BriefcaseBusiness, KeyRound, Languages, LockKeyhole, ShieldCheck } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api, ApiError } from '@/services/api';
 import { Button, Field, Input } from '@/components/ui/primitives';
 import type { FinTaxUser } from '@/types/api';
 import { portalText, usePortalLanguage } from '@/features/fintax/shared/portalLanguage';
+import fintaxLogo from '@/features/fintax/shared/fintax-logo.png';
 
-export function FinTaxLogin({ user }: { user?: FinTaxUser }) {
+export function FinTaxLogin({ user, onSignedIn }: { user?: FinTaxUser; onSignedIn?: () => void }) {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -18,20 +19,11 @@ export function FinTaxLogin({ user }: { user?: FinTaxUser }) {
   const t = (key: Parameters<typeof portalText>[1]) => portalText(language, key);
   const queryClient = useQueryClient();
   const arabic = language === 'ar';
-  const demoSignIn = (account: 'admin' | 'staff' | 'client') => {
-    const demoAccounts = {
-      admin: { identifier: 'admin demo', password: 'admin demo@2026' },
-      staff: { identifier: 'staff demo', password: 'staff demo@2026' },
-      client: { identifier: 'client demo', password: 'client demo@2026' },
-    };
-    setIdentifier(demoAccounts[account].identifier);
-    setPassword(demoAccounts[account].password);
-    signIn.reset();
-  };
   const signIn = useMutation({
     mutationFn: () => api.login(identifier.trim(), password),
     onSuccess: ({ user }) => {
       queryClient.setQueryData(['fintax-user'], { user });
+      onSignedIn?.();
       void queryClient.invalidateQueries();
     },
   });
@@ -57,8 +49,7 @@ export function FinTaxLogin({ user }: { user?: FinTaxUser }) {
         <section className="glass w-full rounded-2xl p-6 sm:p-9">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="grid size-11 place-items-center rounded-xl bg-cyan/10 text-cyan"><ShieldCheck className="size-6" /></div>
-              <div><h1 className="text-xl font-semibold tracking-tight">{t('fintax')}</h1><p className="text-xs text-muted">{t('loadingSignIn')}</p></div>
+              <div><img src={fintaxLogo} alt={t('consulting')} className="brand-logo h-auto w-44 max-w-full object-contain" /><p className="mt-1 text-xs text-muted">{t('loadingSignIn')}</p></div>
             </div>
             <label className="inline-flex items-center gap-1.5">
               <Languages className="size-4 text-muted" />
@@ -103,9 +94,6 @@ export function FinTaxLogin({ user }: { user?: FinTaxUser }) {
               <Button type="submit" variant="primary" loading={signIn.isPending} icon={<KeyRound className="size-4" />} className="w-full">
                 {t('signInSecurely')}
               </Button>
-              <Link to="/demo" className="flex h-10 w-full items-center justify-center gap-2 rounded-lg border hairline text-sm font-medium text-cyan hover:bg-cyan/5">
-                <FileText className="size-4" />{t('exploreDemo')}
-              </Link>
               <p className="text-center text-xs text-muted">{t('accountsCreatedPrivately')}</p>
             </form>
           )}
@@ -121,24 +109,17 @@ export function FinTaxLogin({ user }: { user?: FinTaxUser }) {
             icon={<ShieldCheck className="size-5" />}
             title={t('administrator')}
             description={t('adminDescription')}
-            onDemoLogin={import.meta.env.DEV ? () => demoSignIn('admin') : undefined}
-            demoLabel={t('fillDemoLogin')}
           />
           <RoleCard
             icon={<BriefcaseBusiness className="size-5" />}
             title={t('staff')}
             description={t('staffDescription')}
-            onDemoLogin={import.meta.env.DEV ? () => demoSignIn('staff') : undefined}
-            demoLabel={t('fillDemoLogin')}
           />
           <RoleCard
             icon={<Building2 className="size-5" />}
             title={t('client')}
             description={t('clientDescription')}
-            onDemoLogin={import.meta.env.DEV ? () => demoSignIn('client') : undefined}
-            demoLabel={t('fillDemoLogin')}
           />
-          {import.meta.env.DEV && <p className="rounded-lg border border-warn/25 bg-warn/5 px-4 py-3 text-xs leading-5 text-muted">{t('localDemoWarning')}</p>}
           <div className="flex gap-3 rounded-xl border hairline bg-bg2/55 p-4">
             <LockKeyhole className="mt-0.5 size-4 shrink-0 text-cyan" />
             <div>
@@ -152,13 +133,11 @@ export function FinTaxLogin({ user }: { user?: FinTaxUser }) {
   );
 }
 
-function RoleCard({ icon, title, description, onDemoLogin, demoLabel }: { icon: ReactNode; title: string; description: string; onDemoLogin?: () => void; demoLabel?: string }) {
+function RoleCard({ icon, title, description }: { icon: ReactNode; title: string; description: string }) {
   return (
     <div className="glass flex gap-3 rounded-xl p-4">
       <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-cyan/10 text-cyan">{icon}</span>
-      <div className="min-w-0 flex-1"><h3 className="text-sm font-semibold">{title}</h3><p className="mt-1 text-xs leading-5 text-muted">{description}</p>
-        {onDemoLogin && <button type="button" onClick={onDemoLogin} className="mt-2 text-xs font-medium text-cyan underline-offset-4 hover:underline">{demoLabel}</button>}
-      </div>
+      <div className="min-w-0 flex-1"><h3 className="text-sm font-semibold">{title}</h3><p className="mt-1 text-xs leading-5 text-muted">{description}</p></div>
     </div>
   );
 }

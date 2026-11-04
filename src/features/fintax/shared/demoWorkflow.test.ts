@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  accountingCsv, canTransitionDocumentStatus, categoryForFilename, emptyDemoFields, extractDemoFields, sampleFields, validateDemoFields, validateDemoFile,
+  accountingCsv, canTransitionDocumentStatus, categoryForFilename, CLIENT_MAX_UPLOAD_BYTES, emptyDemoFields, extractDemoFields, extractDocumentDetails, extractDocumentFields, sampleFields, validateDemoFields, validateDemoFile,
   type DemoDocument,
 } from './demoWorkflow';
 
@@ -13,6 +13,7 @@ describe('demo document workflow', () => {
     expect(validateDemoFile({ name: 'letter.docx', size: 1024, type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })).toBeNull();
     expect(validateDemoFile({ name: 'memo.txt', size: 1024, type: 'text/plain' })).toBeNull();
     expect(validateDemoFile({ name: 'large.pdf', size: 50 * 1024 * 1024 + 1, type: 'application/pdf' })).toContain('50 MB');
+    expect(validateDemoFile({ name: 'client-large.pdf', size: CLIENT_MAX_UPLOAD_BYTES + 1, type: 'application/pdf' }, CLIENT_MAX_UPLOAD_BYTES)).toContain('20 MB');
     expect(validateDemoFile({ name: 'script.exe', size: 1024, type: 'application/octet-stream' })).toContain('Choose a PDF');
   });
 
@@ -20,6 +21,9 @@ describe('demo document workflow', () => {
     expect(categoryForFilename('kontoauszug_mai.pdf')).toBe('bank_statement');
     expect(categoryForFilename('purchase_invoice_42.pdf')).toBe('purchase_invoice');
     expect(categoryForFilename('finanzamt_brief.pdf')).toBe('correspondence');
+    expect(categoryForFilename('Mietvertrag.pdf')).toBe('other_correspondence');
+    expect(categoryForFilename('Lease_Agreement.pdf')).toBe('other_correspondence');
+    expect(categoryForFilename('Demo_Gesellschaftsvertrag_Musterwerk_Digital_GmbH.pdf')).toBe('contract');
     expect(categoryForFilename('photo-001.png')).toBe('other');
     expect(categoryForFilename('scan.pdf', 'Kontoauszug October')).toBe('bank_statement');
     expect(categoryForFilename('fintax-demo-invoice.pdf')).toBe('other');
@@ -46,6 +50,57 @@ describe('demo document workflow', () => {
     const vatRateOnly = extractDemoFields('VAT rate: 19%');
     expect(vatRateOnly.fields.vatRate).toBe('19');
     expect(vatRateOnly.fields.vatAmount).toBe('');
+  });
+
+  it('extracts legal-document details without mistaking the contract title for the company', () => {
+    const text = [
+      'Gesellschaftsvertrag',
+      'Musterwerk Digital GmbH',
+      'HRB 123456',
+      'Gründungsdatum: 04.03.2024',
+      '§ 3 Share capital and contributions',
+    ].join('\n');
+
+    const result = extractDocumentFields('contract', text, 'Demo_Gesellschaftsvertrag_Musterwerk_Digital_GmbH.pdf');
+    const details = extractDocumentDetails('contract', text);
+
+    expect(result.fields.counterparty).toBe('Musterwerk Digital GmbH');
+    expect(result.fields.reference).toBe('HRB 123456');
+    expect(result.fields.documentDate).toBe('04.03.2024');
+    expect(result.fields.description).toBe('Gesellschaftsvertrag');
+    expect(details['Organization / counterparty (candidate)']).toBe('Musterwerk Digital GmbH');
+    expect(details['Reference (candidate)']).toBe('HRB 123456');
+  });
+
+  it('extracts type-specific company, register, identity, and bank review details', () => {
+    const company = extractDocumentDetails('company_formation', [
+      'Company name: Muster GmbH',
+      'Registered office: Berlin',
+      'Share capital: EUR 25,000',
+      'Shareholders: Ada Example',
+      'Managing director: Max Example',
+      'Formation date: 04.03.2024',
+    ].join('\n'));
+    expect(company['Company name']).toBe('Muster GmbH');
+    expect(company['Registered office']).toBe('Berlin');
+    expect(company['Share capital']).toBe('EUR 25,000');
+    expect(company.Shareholders).toBe('Ada Example');
+    expect(company['Managing director']).toBe('Max Example');
+
+    const register = extractDocumentDetails('commercial_register', 'HRB 123456\nRegistergericht: Amtsgericht Berlin\nCompany: Muster GmbH\nEintragungsdatum: 04.03.2024');
+    expect(register['HRB number']).toBe('HRB 123456');
+    expect(register.Court).toBe('Amtsgericht Berlin');
+    expect(register.Company).toBe('Muster GmbH');
+
+    const identity = extractDocumentDetails('identity_document', 'Name: Ada Example\nPassport number: X1234567\nExpiry date: 04.03.2030');
+    expect(identity.Name).toBe('Ada Example');
+    expect(identity['Document number']).toBe('X1234567');
+    expect(identity['Expiry date']).toBe('04.03.2030');
+
+    const bank = extractDocumentDetails('bank_statement', 'Statement period: January 2026\nOpening balance: 100.00\nClosing balance: 140.00');
+    expect(bank['Statement period']).toBe('January 2026');
+    expect(bank['Opening balance']).toBe('100.00');
+    expect(bank['Closing balance']).toBe('140.00');
   });
 
   it('checks required fields and amount arithmetic before approval', () => {

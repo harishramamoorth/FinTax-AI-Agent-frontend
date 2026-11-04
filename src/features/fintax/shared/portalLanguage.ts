@@ -45,6 +45,24 @@ const english = {
   loadingSignIn: 'Secure client and staff portal',
   signInTitle: 'Sign in',
   signInDescription: 'Sign in with your FinTax account. Your workspace is selected automatically from your account.',
+  privacyStep: 'Step 3 · Data privacy',
+  privacyHeadline: 'One-time consent at first login',
+  privacyTitle: 'Privacy notice',
+  privacyDescription: 'Before you use your FinTax workspace, we need your one-time consent to the processing of your data.',
+  privacyClientHeadline: 'Privacy before every client login',
+  privacyClientDescription: 'Welcome to the FinTax Consulting client portal. Review this notice and consent to the processing of your data each time you sign in.',
+  privacyReadDetails: 'Read how your data is handled',
+  privacyHideDetails: 'Hide privacy details',
+  privacyEachLogin: 'This notice is required at every client sign-in.',
+  privacyOneTime: 'This notice is shown before your first workspace access.',
+  privacyRequired: 'You must agree before you can continue.',
+  privacyTimestamp: 'Your acceptance date and time are saved in this browser.',
+  privacyDemoWarning: 'This interactive demo uses fictional records. Do not upload real personal or financial data.',
+  privacyConsentLabel: 'I have read this privacy notice and consent to the processing of my data.',
+  privacyAgree: 'Agree and continue',
+  privacyReturnToLogin: 'Decline and return to login',
+  privacySigningOut: 'Signing out…',
+  privacyStorageError: 'Your consent could not be saved. Enable browser storage and try again.',
   identifier: 'Username, staff email, or client number',
   clientNumberHint: 'Clients sign in with their client number.',
   password: 'Password',
@@ -159,6 +177,14 @@ const english = {
   securityNote: 'Security note',
   securityHelp: 'Staff email one-time codes and email password reset are not enabled yet. Contact FinTax if you need account help.',
   localDemoWarning: 'Local demo accounts only. Do not use real documents or expose the development server to the internet.',
+  platformProvidedBy: 'FinTax Consulting client portal',
+  activeClientBadge: 'Active client',
+  hideSensitive: 'Hide sensitive information',
+  showSensitive: 'Show sensitive information',
+  staffFinalApproval: 'Your assigned FinTax team must review and approve this document before it is final.',
+  farsiOcrUnavailable: 'Persian OCR is not available in this browser demo; review the document manually.',
+  processingFailed: 'Document processing failed. Try another file or contact your FinTax team.',
+  legalPlaceholderNotice: 'This demo notice is informational and is not a substitute for legal advice.',
 } as const;
 
 type MessageKey = keyof typeof english;
@@ -182,6 +208,24 @@ const translations: Record<PortalLanguage, Record<MessageKey, string>> = {
     noClientAccounts: 'Noch keine Mandantenkonten.', createClientAccount: 'Mandantenkonto erstellen',
     loadingSignIn: 'Sicheres Portal für Mandanten und Mitarbeiter', signInTitle: 'Anmelden',
     signInDescription: 'Melden Sie sich mit Ihrem FinTax-Konto an. Der passende Arbeitsbereich wird automatisch geöffnet.',
+    privacyStep: 'Schritt 3 · Datenschutz',
+    privacyHeadline: 'Einmalige Zustimmung bei der ersten Anmeldung',
+    privacyTitle: 'Datenschutzhinweis',
+    privacyDescription: 'Bevor Sie Ihren FinTax-Arbeitsbereich nutzen, benötigen wir Ihre einmalige Zustimmung zur Verarbeitung Ihrer Daten.',
+    privacyClientHeadline: 'Datenschutz bei jeder Kundenanmeldung',
+    privacyClientDescription: 'Willkommen im FinTax-Consulting-Mandantenportal. Lesen Sie diesen Hinweis und stimmen Sie der Verarbeitung Ihrer Daten bei jeder Anmeldung zu.',
+    privacyReadDetails: 'Erfahren Sie, wie Ihre Daten verarbeitet werden',
+    privacyHideDetails: 'Datenschutzhinweise ausblenden',
+    privacyEachLogin: 'Dieser Hinweis ist bei jeder Kundenanmeldung erforderlich.',
+    privacyOneTime: 'Dieser Hinweis erscheint vor Ihrem ersten Zugriff auf den Arbeitsbereich.',
+    privacyRequired: 'Sie müssen zustimmen, bevor Sie fortfahren können.',
+    privacyTimestamp: 'Datum und Uhrzeit Ihrer Zustimmung werden in diesem Browser gespeichert.',
+    privacyDemoWarning: 'Diese interaktive Demo verwendet fiktive Datensätze. Laden Sie keine echten personenbezogenen oder finanziellen Daten hoch.',
+    privacyConsentLabel: 'Ich habe diesen Datenschutzhinweis gelesen und stimme der Verarbeitung meiner Daten zu.',
+    privacyAgree: 'Zustimmen und fortfahren',
+    privacyReturnToLogin: 'Ablehnen und zur Anmeldung zurückkehren',
+    privacySigningOut: 'Sie werden abgemeldet…',
+    privacyStorageError: 'Ihre Zustimmung konnte nicht gespeichert werden. Aktivieren Sie den Browserspeicher und versuchen Sie es erneut.',
     identifier: 'Benutzername, Mitarbeiter-E-Mail oder Mandantennummer', clientNumberHint: 'Mandanten melden sich mit ihrer Mandantennummer an.',
     password: 'Passwort', signInSecurely: 'Sicher anmelden', wrongCredentials: 'Konto oder Passwort ist falsch.',
     exploreDemo: 'Interaktive Demo ansehen', accountsCreatedPrivately: 'Konten werden von FinTax erstellt. Eine öffentliche Registrierung ist nicht möglich.',
@@ -246,6 +290,14 @@ const translations: Record<PortalLanguage, Record<MessageKey, string>> = {
     fillDemoLogin: 'Demo-Anmeldung ausfüllen', securityNote: 'Sicherheitshinweis',
     securityHelp: 'Einmalcodes per E-Mail und Passwortzurücksetzung per E-Mail sind noch nicht verfügbar. Wenden Sie sich bei Kontofragen an FinTax.',
     localDemoWarning: 'Nur lokale Demo-Konten. Verwenden Sie keine echten Dokumente und stellen Sie den Entwicklungsserver nicht ins Internet.',
+    platformProvidedBy: 'FinTax Consulting Mandantenportal',
+    activeClientBadge: 'Aktiver Mandant',
+    hideSensitive: 'Vertrauliche Daten ausblenden',
+    showSensitive: 'Vertrauliche Daten anzeigen',
+    staffFinalApproval: 'Ihr zuständiges FinTax-Team muss dieses Dokument prüfen und freigeben, bevor es endgültig ist.',
+    farsiOcrUnavailable: 'Persische OCR ist in dieser Browser-Demo nicht verfügbar. Bitte prüfen Sie das Dokument manuell.',
+    processingFailed: 'Dokumentverarbeitung fehlgeschlagen. Versuchen Sie eine andere Datei oder wenden Sie sich an Ihr FinTax-Team.',
+    legalPlaceholderNotice: 'Dieser Demo-Hinweis dient nur zur Information und ersetzt keine Rechtsberatung.',
   },
   ar: {
     language: 'اللغة', english: 'English', german: 'Deutsch', arabic: 'العربية', fintax: 'FinTax',
@@ -264,6 +316,24 @@ const translations: Record<PortalLanguage, Record<MessageKey, string>> = {
     noClientAccounts: 'لا توجد حسابات عملاء بعد.', createClientAccount: 'إنشاء حساب عميل',
     loadingSignIn: 'بوابة آمنة للعملاء والموظفين', signInTitle: 'تسجيل الدخول',
     signInDescription: 'سجّل الدخول بحساب FinTax. سيتم فتح مساحة العمل المناسبة تلقائيًا.',
+    privacyStep: 'الخطوة 3 · خصوصية البيانات',
+    privacyHeadline: 'موافقة لمرة واحدة عند تسجيل الدخول لأول مرة',
+    privacyTitle: 'إشعار الخصوصية',
+    privacyDescription: 'قبل استخدام مساحة عمل FinTax، نحتاج إلى موافقتك لمرة واحدة على معالجة بياناتك.',
+    privacyClientHeadline: 'الخصوصية قبل كل تسجيل دخول للعميل',
+    privacyClientDescription: 'مرحبًا بك في بوابة عملاء FinTax Consulting. راجع هذا الإشعار ووافق على معالجة بياناتك في كل مرة تسجل فيها الدخول.',
+    privacyReadDetails: 'اطّلع على كيفية التعامل مع بياناتك',
+    privacyHideDetails: 'إخفاء تفاصيل الخصوصية',
+    privacyEachLogin: 'هذا الإشعار مطلوب عند كل تسجيل دخول للعميل.',
+    privacyOneTime: 'يظهر هذا الإشعار قبل دخولك إلى مساحة العمل لأول مرة.',
+    privacyRequired: 'يجب أن توافق قبل المتابعة.',
+    privacyTimestamp: 'يُحفظ تاريخ ووقت موافقتك في هذا المتصفح.',
+    privacyDemoWarning: 'يستخدم هذا العرض التفاعلي سجلات وهمية. لا ترفع بيانات شخصية أو مالية حقيقية.',
+    privacyConsentLabel: 'قرأت إشعار الخصوصية هذا وأوافق على معالجة بياناتي.',
+    privacyAgree: 'أوافق وأتابع',
+    privacyReturnToLogin: 'أرفض وأعود إلى تسجيل الدخول',
+    privacySigningOut: 'جارٍ تسجيل الخروج…',
+    privacyStorageError: 'تعذر حفظ موافقتك. فعّل مساحة تخزين المتصفح وحاول مرة أخرى.',
     identifier: 'اسم المستخدم أو بريد الموظف أو رقم العميل', clientNumberHint: 'يسجل العملاء الدخول باستخدام رقم العميل.',
     password: 'كلمة المرور', signInSecurely: 'تسجيل الدخول بأمان', wrongCredentials: 'الحساب أو كلمة المرور غير صحيحة.',
     exploreDemo: 'استكشف العرض التفاعلي', accountsCreatedPrivately: 'تنشئ FinTax الحسابات. التسجيل العام غير متاح.',
@@ -328,6 +398,14 @@ const translations: Record<PortalLanguage, Record<MessageKey, string>> = {
     fillDemoLogin: 'تعبئة دخول تجريبي', securityNote: 'ملاحظة أمنية',
     securityHelp: 'رموز التحقق لمرة واحدة للموظفين عبر البريد الإلكتروني وإعادة تعيين كلمة المرور عبر البريد غير مفعّلة بعد. تواصل مع FinTax للمساعدة في الحساب.',
     localDemoWarning: 'حسابات تجريبية محلية فقط. لا تستخدم مستندات حقيقية ولا تعرض خادم التطوير على الإنترنت.',
+    platformProvidedBy: 'بوابة عملاء FinTax Consulting',
+    activeClientBadge: 'عميل نشط',
+    hideSensitive: 'إخفاء المعلومات الحساسة',
+    showSensitive: 'إظهار المعلومات الحساسة',
+    staffFinalApproval: 'يجب على فريق FinTax المسؤول مراجعة هذا المستند واعتماده قبل أن يصبح نهائيًا.',
+    farsiOcrUnavailable: 'التعرف الضوئي على الفارسية غير متاح في هذا العرض التجريبي. يرجى مراجعة المستند يدويًا.',
+    processingFailed: 'فشلت معالجة المستند. جرّب ملفًا آخر أو تواصل مع فريق FinTax.',
+    legalPlaceholderNotice: 'هذا الإشعار التجريبي للمعلومات فقط ولا يُعد بديلًا عن الاستشارة القانونية.',
   },
 };
 
@@ -372,6 +450,7 @@ export const usePortalLanguage = create<PortalLanguageState>((set) => ({
   setLanguage: (language) => {
     try {
       localStorage.setItem(STORAGE_KEY, language);
+      localStorage.setItem('fintax-language', language);
     } catch {
       // Keep the selected language in memory when storage is blocked.
     }
@@ -381,6 +460,10 @@ export const usePortalLanguage = create<PortalLanguageState>((set) => ({
 
 export function portalText(language: PortalLanguage, key: MessageKey): string {
   return translations[language][key];
+}
+
+export function isRtl(language: PortalLanguage): boolean {
+  return language === 'ar';
 }
 
 export function portalExtractionNote(language: PortalLanguage, note: string): string {

@@ -87,7 +87,7 @@ interface DemoDocumentsState {
   roleAssignments: DemoRoleAssignment[];
   exports: { id: string; at: string; actor: string; documentIds: string[] }[];
   addDocument(document: DemoDocument, actor?: string): void;
-  setChecklistItem(periodId: string, key: string, state: 'uploaded' | 'not_applicable', reason: string, actor: string): void;
+  setChecklistItem(periodId: string, key: string, state: 'missing' | 'uploaded' | 'not_applicable', reason: string, actor: string): void;
   submitPeriod(periodId: string, clientId: string, actor: string): { ok: boolean; blockers: string[] };
   reviewMonth(periodId: string, actor: string, action: 'start_review' | 'request_changes' | 'approve', details: string, analysis?: MonthlyPeriod['analysis']): boolean;
   resolveMonthFinding(periodId: string, findingId: string, actor: string, details: string): void;
@@ -443,7 +443,7 @@ export const useDemoDocumentsStore = create<DemoDocumentsState>((set, get) => ({
       documents: state.documents.map((document) => document.id === id && document.clientRequest
       ? {
         ...document,
-        clientRequest: { ...document.clientRequest, response, resolvedAt: new Date().toISOString() },
+        clientRequest: { ...document.clientRequest, response, resolvedAt: new Date().toISOString(), status: 'pending_review' },
         reviewHistory: [...(document.reviewHistory ?? []), {
           at: new Date().toISOString(),
           action: 'Client response',
