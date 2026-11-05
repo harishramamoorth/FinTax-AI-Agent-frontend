@@ -392,7 +392,7 @@ export default function RoleLoginPage({
       </div>
 
       <motion.div {...enterTransition} className="relative z-10 w-full max-w-6xl">
-        <div className="mb-3 flex items-center justify-between">
+        <div className="auth-login-topbar mb-3 flex items-center justify-between">
           <LoginBrandHeader platform={text.platform} />
           <label className="inline-flex items-center gap-1.5 rounded-xl border border-ink/10 bg-white/80 px-2.5 py-1 text-xs shadow-sm backdrop-blur">
             <Globe2 className="size-3.5 text-cyan" />

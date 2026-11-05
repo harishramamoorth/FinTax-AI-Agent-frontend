@@ -14,23 +14,24 @@ import {
 } from 'lucide-react';
 import { Button, ProgressBar } from '@/components/ui/primitives';
 import type { AssistantLanguage } from '../clientAssistant';
-import { categoryForFilename, DEMO_CATEGORIES, extractDocumentDetails, extractDocumentFields, type DemoCategory, type DemoDocument, type DemoFields } from '../../shared/demoWorkflow';
-import { t3 } from '../clientPageUtils';
+import { categoryFromDocumentText, categoryForFilename, DEMO_CATEGORIES, extractDocumentDetails, extractDocumentFields, type DemoCategory, type DemoDocument, type DemoFields } from '../../shared/demoWorkflow';
+import { formatBytes, t3 } from '../clientPageUtils';
 import { CLIENT_MAX_UPLOAD_BYTES } from '../../shared/demoWorkflow';
 import { portalText, usePortalLanguage } from '../../shared/portalLanguage';
 import { AREAS, cx, type ClientArea } from '../clientUi';
+import type { QueuedClientUpload } from '../clientUploadQueue';
 import type { MonthlyPeriod } from '../../shared/storage/models';
 
 export type { ClientArea };
 
 interface ClientDocumentUploadPageProps {
   activePeriodDocuments: DemoDocument[];
+  queuedUploads: QueuedClientUpload[];
   pendingDocuments: DemoDocument[];
   reviewTargetId?: string | null;
   storageReady: boolean;
   storageError: string;
-  category: DemoCategory;
-  selectedTypeId?: string;
+  selectedTypeIds: string[];
   selectedArea?: ClientArea;
   activePeriod?: MonthlyPeriod;
   periods: MonthlyPeriod[];
@@ -45,11 +46,14 @@ interface ClientDocumentUploadPageProps {
   fileInput: MutableRefObject<HTMLInputElement | null>;
   cameraInput: MutableRefObject<HTMLInputElement | null>;
   primarySaveRef?: RefObject<HTMLButtonElement>;
-  onCategoryChange: (category: DemoCategory) => void;
   onReviewDocument?: (documentId: string) => void;
-  onTypeChange?: (typeId: string) => void;
+  onRetryUpload: (document: DemoDocument) => void;
+  onSelectedTypeIdsChange: (typeIds: string[]) => void;
   onAreaChange?: (area: ClientArea) => void;
   onOpenCamera: () => void;
+  onSubmitFiles: () => void;
+  onRemoveQueuedFile: (id: string) => void;
+  onQueuedFileTypeChange: (id: string, typeId: string) => void;
   onDrop: (event: DragEvent<HTMLElement>) => void;
   onDragOver: () => void;
   onDragLeave: () => void;
@@ -91,7 +95,7 @@ export const AREA_CHECKBOXES: Record<ClientArea, UploadType[]> = {
   ],
   correspondence: [
     { id: 'c-authority', label: ['Letters from authorities', 'Behördenschreiben', 'خطابات الجهات الرسمية'], category: 'correspondence' },
-    { id: 'c-contract', label: ['Lease agreement', 'Mietvertrag', 'عقد إيجار'], category: 'other_correspondence' },
+    { id: 'c-contract', label: ['Contracts / lease agreements', 'Verträge / Mietverträge', 'العقود / عقود الإيجار'], category: 'contract' },
     { id: 'c-other', label: ['Other documents', 'Sonstige Unterlagen', 'مستندات أخرى'], category: 'other_correspondence' },
   ],
 };
@@ -122,7 +126,7 @@ function ExtractedDocumentReview({ item, storageReady, onSave, onChangeType, pri
       : item.category === 'commercial_register' || item.category === 'company_formation' || item.category === 'contract'
         ? ['counterparty', 'reference', 'documentDate']
         : ['documentDate', 'counterparty', 'reference', 'description', 'netAmount', 'vatRate', 'vatAmount', 'grossAmount'];
-  const detectedCategory = categoryForFilename(item.name, text);
+  const detectedCategory = categoryFromDocumentText(text) ?? categoryForFilename(item.name, text);
   const isCompatibleFormationType = [detectedCategory, item.category].every((value) => value === 'company_formation' || value === 'contract');
   const hasTypeMismatch = detectedCategory !== 'other' && detectedCategory !== item.category && !isCompatibleFormationType;
   const detectedFieldCount = fieldKeys.filter((key) => fields[key].trim()).length;
@@ -293,12 +297,12 @@ function ExtractedDocumentReview({ item, storageReady, onSave, onChangeType, pri
 
 export default function ClientDocumentUploadPage({
   activePeriodDocuments,
+  queuedUploads,
   pendingDocuments,
   reviewTargetId,
   storageReady,
   storageError,
-  category,
-  selectedTypeId: selectedTypeIdProp,
+  selectedTypeIds: selectedTypeIdsProp,
   selectedArea: initialArea = 'accounting',
   activePeriod,
   periods,
@@ -313,11 +317,14 @@ export default function ClientDocumentUploadPage({
   fileInput,
   cameraInput,
   primarySaveRef,
-  onCategoryChange,
   onReviewDocument,
-  onTypeChange,
+  onRetryUpload,
+  onSelectedTypeIdsChange,
   onAreaChange,
   onOpenCamera,
+  onSubmitFiles,
+  onRemoveQueuedFile,
+  onQueuedFileTypeChange,
   onDrop,
   onDragOver,
   onDragLeave,
@@ -326,7 +333,7 @@ export default function ClientDocumentUploadPage({
   onChangeDocumentType,
 }: ClientDocumentUploadPageProps) {
   const [activeArea, setActiveArea] = useState<ClientArea>(initialArea);
-  const [selectedTypeId, setSelectedTypeId] = useState(() => selectedTypeIdProp ?? uploadTypeForCategory(initialArea, category));
+  const [selectedTypeIds, setSelectedTypeIds] = useState<string[]>(selectedTypeIdsProp);
   const [queueOpen, setQueueOpen] = useState(false);
   const portalLang = usePortalLanguage((state) => state.language);
   const reduceMotion = useReducedMotion();
@@ -347,22 +354,27 @@ export default function ClientDocumentUploadPage({
   }, [initialArea]);
 
   useEffect(() => {
-    if (selectedTypeIdProp) setSelectedTypeId(selectedTypeIdProp);
-  }, [selectedTypeIdProp]);
+    setSelectedTypeIds(selectedTypeIdsProp);
+  }, [selectedTypeIdsProp]);
 
   const switchArea = (area: ClientArea) => {
     setActiveArea(area);
     if (onAreaChange) onAreaChange(area);
     const firstType = AREA_CHECKBOXES[area][0];
-    setSelectedTypeId(firstType?.id ?? '');
-    if (firstType) onTypeChange?.(firstType.id);
-    onCategoryChange(firstType?.category ?? 'other');
+    const typeIds = firstType ? [firstType.id] : [];
+    setSelectedTypeIds(typeIds);
+    onSelectedTypeIdsChange(typeIds);
   };
 
-  const chooseType = (id: string, cat: DemoCategory) => {
-    setSelectedTypeId(id);
-    onTypeChange?.(id);
-    onCategoryChange(cat);
+  const toggleType = (item: UploadType) => {
+    const currentTypes = AREA_CHECKBOXES[activeArea].filter((type) => selectedTypeIds.includes(type.id));
+    const nextTypes = currentTypes.some((type) => type.id === item.id)
+      ? currentTypes.filter((type) => type.id !== item.id)
+      : [...currentTypes, item];
+    if (!nextTypes.length) return;
+    const typeIds = nextTypes.map((type) => type.id);
+    setSelectedTypeIds(typeIds);
+    onSelectedTypeIdsChange(typeIds);
   };
   const typeLabel = (item: UploadType) => t3(lang, ...item.label);
 
@@ -411,7 +423,7 @@ export default function ClientDocumentUploadPage({
       {uploadError && (
         <div role="alert" className="rounded-xl border border-rose-500/25 bg-rose-500/10 p-3 text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2">
           <AlertTriangle className="size-4 shrink-0 text-rose-600" />
-          <span>{uploadError.includes('failed') ? portalText(portalLang, 'processingFailed') : uploadError}</span>
+          <span className="min-w-0 break-words">{uploadError}</span>
         </div>
       )}
 
@@ -438,11 +450,11 @@ export default function ClientDocumentUploadPage({
                     : 'border-[#E6E0D0] bg-white text-[#4A5468] hover:border-[#B07A2A]',
                 )}
               >
-                <span className="flex items-center gap-1.5 text-sm font-semibold">
+                <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-sm font-semibold leading-5">
                   <AreaIcon className="size-4 shrink-0 text-[#0B7F99]" aria-hidden="true" />
-                  {areaTitle(key)}
+                  <span className="min-w-0 break-words">{areaTitle(key)}</span>
                 </span>
-                <span className="text-[11px] leading-4 text-[#4A5468]">{areaDescription(key)}</span>
+                <span className="min-w-0 break-words text-[11px] leading-4 text-[#4A5468]">{areaDescription(key)}</span>
               </button>
             ))}
           </div>
@@ -468,15 +480,16 @@ export default function ClientDocumentUploadPage({
           <legend className="px-1 text-xs font-semibold uppercase tracking-[.12em] text-[#4A5468]">{t3(lang, 'Type of documents', 'Art der Unterlagen', 'نوع المستند')}</legend>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {AREA_CHECKBOXES[activeArea].map((item) => (
-                <label key={item.id} className={cx('flex min-h-11 min-w-0 cursor-pointer items-center gap-2.5 rounded-xl border bg-white px-3 py-2 text-sm leading-5 transition-colors hover:border-[#B07A2A] focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[#0B7F99]', selectedTypeId === item.id ? 'border-[#B07A2A] bg-[#B07A2A]/5 text-[#1F2A44]' : 'border-[#E6E0D0] text-[#4A5468]')}>
-                  <input type="radio" name="upload-document-type" value={item.id} checked={selectedTypeId === item.id} onChange={() => chooseType(item.id, item.category)} className="sr-only" />
-                  <span aria-hidden="true" className={cx('grid size-4 shrink-0 place-items-center rounded border', selectedTypeId === item.id ? 'border-[#0B7F99] bg-[#0B7F99] text-white' : 'border-[#9AA0A6] bg-white')}>
-                    {selectedTypeId === item.id && <Check className="size-3" strokeWidth={3} />}
+                <label key={item.id} className={cx('flex min-h-11 min-w-0 cursor-pointer items-center gap-2.5 rounded-xl border bg-white px-3 py-2 text-sm leading-5 transition-colors hover:border-[#B07A2A] focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[#0B7F99]', selectedTypeIds.includes(item.id) ? 'border-[#B07A2A] bg-[#B07A2A]/5 text-[#1F2A44]' : 'border-[#E6E0D0] text-[#4A5468]')}>
+                  <input type="checkbox" name="upload-document-type" value={item.id} checked={selectedTypeIds.includes(item.id)} onChange={() => toggleType(item)} className="sr-only" />
+                  <span aria-hidden="true" className={cx('grid size-4 shrink-0 place-items-center rounded border', selectedTypeIds.includes(item.id) ? 'border-[#0B7F99] bg-[#0B7F99] text-white' : 'border-[#9AA0A6] bg-white')}>
+                    {selectedTypeIds.includes(item.id) && <Check className="size-3" strokeWidth={3} />}
                   </span>
-                  <span>{typeLabel(item)}</span>
+                  <span className="min-w-0 break-words">{typeLabel(item)}</span>
                 </label>
               ))}
             </div>
+            <p className="mt-2 text-xs text-[#4A5468]">{t3(lang, 'Choose all document types in this batch. You can set the type for each file below.', 'Wählen Sie alle Dokumentarten für diesen Upload. Den Typ können Sie unten je Datei festlegen.', 'اختر جميع أنواع المستندات في هذه الدفعة. يمكنك تحديد نوع كل ملف أدناه.')}</p>
         </fieldset>
 
         <section id="client-upload" className="scroll-mt-24 space-y-4" aria-label={t3(lang, 'Upload form', 'Upload-Formular', 'نموذج الرفع')}>
@@ -485,7 +498,7 @@ export default function ClientDocumentUploadPage({
             onDragOver={(event) => { event.preventDefault(); onDragOver(); }}
             onDragLeave={onDragLeave}
             onClick={(event) => {
-              if (uploadDisabled || (event.target as HTMLElement).closest('button, a, input, select, textarea')) return;
+              if (uploadDisabled || (event.target as HTMLElement).closest('.client-camera-action')) return;
               fileInput.current?.click();
             }}
             onKeyDown={(event) => {
@@ -516,13 +529,44 @@ export default function ClientDocumentUploadPage({
               </div>
               <p className="mt-2 text-sm font-semibold text-[#0f1f3d]">{dragOver
                 ? t3(lang, 'Drop files to add them', 'Dateien hier ablegen', 'أفلت الملفات لإضافتها')
-                : <><button type="button" disabled={uploadDisabled} onClick={() => fileInput.current?.click()} className="min-h-11 rounded px-1 text-[#0F1B3D] underline decoration-[#B07A2A] underline-offset-2 focus-visible:outline-2 focus-visible:outline-[#0B7F99]">{t3(lang, 'Choose files', 'Dateien auswählen', 'اختر الملفات')}</button><span className="font-normal text-[#4A5468]"> {t3(lang, 'or drop them here', 'oder hier ablegen', 'أو أفلتها هنا')}</span></>}</p>
+                : <><span className="rounded px-1 text-[#0F1B3D] underline decoration-[#B07A2A] underline-offset-2">{t3(lang, 'Choose files', 'Dateien auswählen', 'اختر الملفات')}</span><span className="font-normal text-[#4A5468]"> {t3(lang, 'or drop them here', 'oder hier ablegen', 'أو أفلتها هنا')}</span></>}</p>
               <p className="mt-1 text-xs text-slate-500">{t3(lang, 'PDF, photos, Word, Excel, CSV or text · up to', 'PDF, Fotos, Word, Excel, CSV oder Text · bis zu', 'PDF أو صور أو Word أو Excel أو CSV أو نص · حتى')} {CLIENT_MAX_UPLOAD_BYTES / 1024 / 1024} MB {t3(lang, 'per file', 'pro Datei', 'لكل ملف')}</p>
-              <button type="button" aria-label={t3(lang, 'Take photo', 'Foto aufnehmen', 'التقط صورة')} title={t3(lang, 'Take photo', 'Foto aufnehmen', 'التقط صورة')} disabled={uploadDisabled} onClick={onOpenCamera} className="client-camera-action absolute end-2 top-2 z-10 inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[#E6E0D0] bg-white px-3 text-[#4A5468] hover:border-[#B07A2A] focus-visible:outline-2 focus-visible:outline-[#0B7F99]">
+              <button type="button" aria-label={t3(lang, 'Take photo', 'Foto aufnehmen', 'التقط صورة')} title={t3(lang, 'Take photo', 'Foto aufnehmen', 'التقط صورة')} disabled={uploadDisabled} onClick={(event) => { event.stopPropagation(); onOpenCamera(); }} className="client-camera-action absolute end-2 top-2 z-10 inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[#E6E0D0] bg-white px-3 text-[#4A5468] hover:border-[#B07A2A] focus-visible:outline-2 focus-visible:outline-[#0B7F99]">
                 <Camera className="size-4" /><span>{t3(lang, 'Take photo', 'Foto aufnehmen', 'التقط صورة')}</span>
               </button>
             </div>
           </motion.div>
+
+          {queuedUploads.length > 0 && (
+            <section aria-label={t3(lang, 'Files ready to upload', 'Dateien zum Hochladen', 'الملفات الجاهزة للرفع')} className="rounded-xl border border-[#E6E0D0] bg-white p-3">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-[#1F2A44]">{t3(lang, 'Files to send', 'Dateien zum Senden', 'ملفات للإرسال')}</h3>
+                <span className="rounded-full bg-[#0B7F99]/10 px-2.5 py-1 text-xs font-semibold text-[#0B7F99]">{queuedUploads.length}</span>
+              </div>
+              <ul className="mt-2 divide-y divide-[#E6E0D0]">
+                {queuedUploads.map((upload) => (
+                  <li key={upload.id} className="grid min-w-0 grid-cols-1 items-center gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(160px,0.8fr)_auto]">
+                    <span className="min-w-0">
+                      <span className="block break-all text-sm font-medium text-[#1F2A44]">{upload.file.name}</span>
+                      <span className="text-xs text-[#4A5468]">{formatBytes(upload.file.size)}</span>
+                    </span>
+                    <label className="text-xs font-medium text-[#4A5468]">
+                      {t3(lang, 'Document type', 'Dokumentenart', 'نوع المستند')}
+                      <select value={upload.typeId} onChange={(event) => onQueuedFileTypeChange(upload.id, event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-[#E6E0D0] bg-[#F8F6F1] px-2 text-sm text-[#1F2A44]">
+                        {AREA_CHECKBOXES[upload.area].map((item) => <option key={item.id} value={item.id}>{typeLabel(item)}</option>)}
+                      </select>
+                    </label>
+                    <button type="button" aria-label={`${t3(lang, 'Remove', 'Entfernen', 'إزالة')} ${upload.file.name}`} onClick={() => onRemoveQueuedFile(upload.id)} className="min-h-11 justify-self-end rounded-lg px-3 text-xs font-semibold text-rose-700 hover:bg-rose-50 focus-visible:outline-2 focus-visible:outline-[#0B7F99] sm:col-start-3 sm:row-start-1">
+                      {t3(lang, 'Remove', 'Entfernen', 'إزالة')}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <Button variant="primary" className="mt-2 min-h-11 w-full rounded-xl bg-[#0F1B3D] text-white hover:bg-[#1B3160]" disabled={uploadDisabled} onClick={onSubmitFiles}>
+                {t3(lang, 'Upload and process files', 'Dateien hochladen und verarbeiten', 'رفع الملفات ومعالجتها')} <span aria-hidden="true">→</span>
+              </Button>
+            </section>
+          )}
 
           <div className="rounded-xl border border-[#E6E0D0] bg-white p-3">
             <label className="block text-start text-xs font-semibold text-[#1F2A44]">
@@ -551,18 +595,28 @@ export default function ClientDocumentUploadPage({
                   const isReading = item.status === 'processing';
                   const isReady = item.clientSaved === false && item.extractedText !== undefined;
                   const isSent = item.clientSaved === true;
+                  const hasActionRequired = item.status === 'action_required' || item.status === 'password_required';
+                  const hasFailed = item.status === 'password_required'
+                    || (item.status === 'action_required'
+                      && (Boolean(item.validationWarnings?.length) || item.note?.includes('Processing was canceled') === true));
                   return (
                     <li key={item.id} id={`client-upload-queue-${item.id}`} className="flex min-w-0 flex-wrap items-center gap-3 py-3">
-                      <span className={`grid size-9 shrink-0 place-items-center rounded-full ${isSent ? 'bg-[#1F8A5B]/10 text-[#1F8A5B]' : isReady ? 'bg-[#D98A1B]/10 text-[#8A5600]' : 'bg-[#0B7F99]/10 text-[#0B7F99]'}`}>
-                        {isSent ? <CheckCircle2 className="client-send-success size-5" /> : isReady ? <FileUp className="size-5" /> : <ProgressBar value={item.processingProgress ?? 0} active />}
+                      <span className={`grid size-9 shrink-0 place-items-center rounded-full ${isSent ? 'bg-[#1F8A5B]/10 text-[#1F8A5B]' : hasFailed ? 'bg-rose-500/10 text-rose-700' : hasActionRequired ? 'bg-amber-500/10 text-amber-700' : isReady ? 'bg-[#D98A1B]/10 text-[#8A5600]' : 'bg-[#0B7F99]/10 text-[#0B7F99]'}`}>
+                        {isSent ? <CheckCircle2 className="client-send-success size-5" /> : hasActionRequired ? <AlertTriangle className="size-5" /> : isReady ? <FileUp className="size-5" /> : <ProgressBar value={item.processingProgress ?? 0} active />}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block break-words text-sm font-medium text-[#1F2A44]">{item.name}</span>
                         <span className="mt-0.5 block text-sm text-[#4A5468]" aria-live="polite">
-                          {isSent ? t3(lang, 'Sent', 'Gesendet', 'تم الإرسال') : isReady ? t3(lang, 'Ready to review', 'Bereit zur Prüfung', 'جاهز للمراجعة') : t3(lang, 'Reading', 'Wird gelesen', 'جارٍ القراءة')}
+                          {isSent ? t3(lang, 'Sent', 'Gesendet', 'تم الإرسال') : hasFailed ? t3(lang, 'Could not read this file. Upload it again.', 'Datei konnte nicht gelesen werden. Bitte erneut hochladen.', 'تعذرت قراءة الملف. يرجى رفعه مرة أخرى.') : hasActionRequired ? t3(lang, 'Needs your attention', 'Ihre Aufmerksamkeit ist erforderlich', 'يتطلب انتباهك') : isReady ? t3(lang, 'Ready to review', 'Bereit zur Prüfung', 'جاهز للمراجعة') : t3(lang, 'Reading', 'Wird gelesen', 'جارٍ القراءة')}
                         </span>
+                        {hasActionRequired && item.note && <span className="mt-1 block break-words text-xs text-rose-700">{item.note}</span>}
                         {isReading && <span className="mt-2 block max-w-xs"><ProgressBar value={item.processingProgress ?? 0} active /></span>}
                       </span>
+                      {hasFailed && (
+                        <Button size="sm" variant="outline" className="min-h-11 rounded-xl" disabled={!storageReady || periodReadOnly} onClick={() => onRetryUpload(item)}>
+                          <RotateCw className="me-1 size-3.5" />{t3(lang, 'Upload again', 'Erneut hochladen', 'إعادة الرفع')}
+                        </Button>
+                      )}
                       {isReading && item.extractedText === undefined && (
                         <Button size="sm" variant="outline" className="min-h-11 rounded-xl" onClick={() => onCancelUpload(item)}>
                           {t3(lang, 'Cancel', 'Abbrechen', 'إلغاء')}

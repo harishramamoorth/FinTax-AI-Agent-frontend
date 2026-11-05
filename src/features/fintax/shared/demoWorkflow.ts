@@ -95,12 +95,12 @@ export function validateDemoFile(
   file: Pick<File, 'name' | 'size' | 'type'>,
   maxFileBytes = MAX_DEMO_FILE_BYTES,
 ): string | null {
-  if (file.size === 0) return 'This file is empty.';
-  if (file.size > maxFileBytes) return `Files must be ${maxFileBytes / 1024 / 1024} MB or smaller.`;
+  if (file.size === 0) return 'This file is empty. Choose a valid document and upload it again.';
+  if (file.size > maxFileBytes) return `Files must be ${maxFileBytes / 1024 / 1024} MB or smaller. Choose a smaller file and upload it again.`;
   const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
   const supportedType = acceptedTypes.has(file.type.toLowerCase());
   if (!acceptedExtensions.has(extension) && !supportedType) {
-    return 'Choose a PDF, common photo/scan (JPEG, PNG, WebP, HEIC, TIFF, BMP), XLSX, CSV, TXT, or DOCX file.';
+    return 'This file type is not supported. Choose a PDF, common photo/scan (JPEG, PNG, WebP, HEIC, TIFF, BMP), XLSX, CSV, TXT, or DOCX file, then upload it again.';
   }
   return null;
 }
@@ -124,6 +124,29 @@ export function categoryForFilename(name: string, text = ''): DemoCategory {
   if (/\b(?:correspondence|letter|brief)\b/.test(value)) return 'other_correspondence';
   if (/\b(?:passport|identity|emirates|ausweis|id card)\b/.test(value)) return 'identity_document';
   return 'other';
+}
+
+export function categoryFromDocumentText(text: string): DemoCategory | null {
+  const value = text.toLowerCase().replace(/[_-]+/g, ' ');
+  const matches: [RegExp, DemoCategory][] = [
+    [/\b(?:bank statement|account statement|kontoauszug|statement period|opening balance|closing balance|kontostand)\b/, 'bank_statement'],
+    [/\b(?:incoming invoice|purchase invoice|supplier invoice|vendor invoice|eingangsrechnung|lieferantenrechnung)\b/, 'purchase_invoice'],
+    [/\b(?:outgoing invoice|sales invoice|customer invoice|ausgangsrechnung|kundenrechnung)\b/, 'sales_invoice'],
+    [/\b(?:cash book|cashbook|kassenbuch)\b/, 'cash_book'],
+    [/\b(?:payslip|pay slip|payroll|salary statement|wage statement|lohnabrechnung|gehaltsabrechnung)\b/, 'payroll'],
+    [/\b(?:timesheet|time sheet|working hours|hours worked|stundennachweis|arbeitszeitnachweis)\b/, 'timesheet'],
+    [/\b(?:sick note|sick leave|medical certificate|krankmeldung|arbeitsunfähigkeitsbescheinigung)\b/, 'sick_note'],
+    [/\b(?:employee record|employee information|personalakte|mitarbeiterstammdaten)\b/, 'employee_record'],
+    [/\b(?:commercial register extract|register extract|handelsregisterauszug|handelsregister)\b|\b(?:hrb|hra)\s*\d{2,}/, 'commercial_register'],
+    [/\b(?:passport|identity card|id card|personalausweis|reisepass|identity document)\b/, 'identity_document'],
+    [/\b(?:articles of association|shareholders agreement|partnership deed|gesellschaftsvertrag|contract|vertrag|lease agreement|mietvertrag)\b/, 'contract'],
+    [/\b(?:company formation|business registration|certificate of incorporation|gründungsurkunde|gewerbeanmeldung)\b/, 'company_formation'],
+    [/\b(?:tax office|finanzamt|steuerbescheid|tax assessment)\b/, 'correspondence'],
+    [/\b(?:receipt|cash receipt|kassenbon|kassenbeleg|quittung)\b/, 'receipt'],
+    [/\b(?:correspondence|letter|brief)\b/, 'other_correspondence'],
+  ];
+
+  return matches.find(([pattern]) => pattern.test(value))?.[1] ?? null;
 }
 
 export function sampleFields(category: DemoCategory, id: string): DemoFields {

@@ -208,7 +208,7 @@ export default function ClientDashboardPage({
           { area: 'accounting' as const, title: t3(language, 'Accounting', 'Buchhaltung', 'المحاسبة'), description: t3(language, 'Monthly · bank statements, invoices, cash and fuel receipts', 'Monatlich · Kontoauszüge, Rechnungen, Kassen- und Tankbelege', 'شهريًا · كشوف الحساب والفواتير والإيصالات وإيصالات الوقود'), count: accountingDocs.length, icon: Receipt, accent: 'border-s-[#5579ae]', iconTone: 'bg-[#edf2f9] text-[#3d6094]' },
           { area: 'correspondence' as const, title: t3(language, 'Correspondence', 'Korrespondenz', 'المراسلات'), description: t3(language, 'Formerly “Other” · letters from authorities, lease agreements and other documents', 'Früher „Sonstiges“ · Behördenschreiben, Mietverträge und weitere Unterlagen', 'كانت تُسمى «أخرى» · خطابات الجهات الرسمية وعقود الإيجار ومستندات أخرى'), count: correspondenceDocs.length, icon: Mail, accent: 'border-s-[#9a6d9c]', iconTone: 'bg-[#f5eef6] text-[#805585]' },
         ].map(({ area, title, description, count, icon: Icon, accent, iconTone }) => (
-          <button key={area} type="button" onClick={() => onOpenUpload(area)} aria-label={`${title}: ${count} files. Upload in this category.`} className={`client-category-card flex min-h-28 min-w-0 flex-col items-stretch rounded-2xl border border-[#e8e2d2] border-s-4 ${accent} bg-white p-3 text-start shadow-sm transition-shadow hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0B7F99] sm:min-h-40 sm:p-5`}>
+          <article key={area} className={`client-category-card flex min-h-28 min-w-0 flex-col items-stretch rounded-2xl border border-[#e8e2d2] border-s-4 ${accent} bg-white p-3 text-start shadow-sm transition-shadow hover:shadow-md sm:min-h-40 sm:p-5`}>
             <div className="flex min-w-0 items-center gap-2 sm:items-start sm:gap-3">
               <span className={`grid size-10 shrink-0 place-items-center rounded-xl ${iconTone}`}><Icon className="size-5" /></span>
               <div className="min-w-0 flex-1">
@@ -216,8 +216,19 @@ export default function ClientDashboardPage({
                 <p className="client-category-description mt-0.5 text-xs leading-5 text-slate-500">{description}</p>
               </div>
             </div>
-            <span className="mt-auto pt-2 text-[11px] text-slate-500">{count} {t3(language, count === 1 ? 'file' : 'files', count === 1 ? 'Datei' : 'Dateien', 'ملفات')}</span>
-          </button>
+            <div className="mt-auto flex items-center justify-between gap-2 pt-3">
+              <span className="text-[11px] text-slate-500">{count} {t3(language, count === 1 ? 'file' : 'files', count === 1 ? 'Datei' : 'Dateien', 'ملفات')}</span>
+              <button
+                type="button"
+                onClick={() => onOpenUpload(area)}
+                aria-label={`${t3(language, 'Upload', 'Hochladen', 'رفع')} ${title}`}
+                className="inline-flex min-h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-[#0F1B3D] px-3 text-xs font-semibold text-white transition-colors hover:bg-[#1B3160] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0B7F99]"
+              >
+                <Upload className="size-3.5" aria-hidden="true" />
+                {t3(language, 'Upload', 'Upload', 'رفع')}
+              </button>
+            </div>
+          </article>
         ))}
       </section>
 

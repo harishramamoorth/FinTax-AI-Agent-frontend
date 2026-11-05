@@ -37,11 +37,11 @@ export default function PrivacyNotice({
     <main
       lang={language}
       dir={isRtl(language) ? 'rtl' : 'ltr'}
-      className="min-h-screen bg-bg px-4 py-6 text-ink sm:px-6 sm:py-8"
+      className="privacy-notice-page min-h-screen bg-bg px-4 py-6 text-ink sm:px-6 sm:py-8"
     >
-      <div className="mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-[620px] flex-col">
+      <div className="privacy-notice-layout mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-[620px] flex-col">
         {onLanguageChange && (
-          <div className="mb-3 flex justify-end">
+          <div className="privacy-notice-language mb-3 flex justify-end">
             <label className="inline-flex items-center gap-2 rounded-lg border hairline bg-panel px-3 py-1.5 text-sm font-medium text-ink shadow-sm">
               <Globe2 className="size-4 text-cyan" aria-hidden="true" />
               <span className="sr-only">{t('language')}</span>
@@ -59,15 +59,15 @@ export default function PrivacyNotice({
           </div>
         )}
 
-        <section className="glass my-auto w-full rounded-2xl p-6 sm:p-9 shadow-lg">
-          <div className="mb-6 flex justify-center sm:justify-start">
+        <section className="privacy-notice-card glass my-auto w-full rounded-2xl p-6 shadow-lg sm:p-9">
+          <div className="privacy-notice-brand mb-6 flex justify-center sm:justify-start">
             <img
               src={fintaxLogo}
               alt="FinTax Consulting"
               className="brand-logo h-auto w-44 max-w-full object-contain"
             />
           </div>
-          <div className="flex items-center gap-4">
+          <div className="privacy-notice-heading flex items-center gap-4">
             <span className="grid size-11 shrink-0 place-items-center rounded-xl border hairline bg-cyan/10 text-cyan">
               <LockKeyhole className="size-5" aria-hidden="true" />
             </span>
@@ -79,7 +79,7 @@ export default function PrivacyNotice({
             </div>
           </div>
 
-          <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2.5">
+          <div className="privacy-notice-alert mt-4 flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200">
             <AlertCircle className="size-4 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
             <div>
               <span className="font-semibold">{t('legalPlaceholderNotice')}</span>
@@ -89,7 +89,7 @@ export default function PrivacyNotice({
             </div>
           </div>
 
-          <p className="mt-5 text-base leading-7 text-muted">
+          <p className="privacy-notice-description mt-5 text-base leading-7 text-muted">
             {t('privacyDescription')}
           </p>
 
@@ -98,7 +98,7 @@ export default function PrivacyNotice({
             aria-expanded={showDetails}
             aria-controls="privacy-details"
             onClick={() => setShowDetails((visible) => !visible)}
-            className="mt-4 text-left text-sm font-semibold text-cyan underline decoration-cyan/50 underline-offset-4 hover:text-blue focus-visible:rounded-sm"
+            className="privacy-notice-details-toggle mt-4 text-left text-sm font-semibold text-cyan underline decoration-cyan/50 underline-offset-4 hover:text-blue focus-visible:rounded-sm"
           >
             {t(showDetails ? 'privacyHideDetails' : 'privacyReadDetails')}
           </button>
@@ -118,8 +118,8 @@ export default function PrivacyNotice({
             </p>
           )}
 
-          <form onSubmit={submit} className="mt-5 space-y-4">
-            <label className="flex cursor-pointer items-start gap-3 rounded-xl border hairline bg-ink/5 p-4 text-sm leading-6 text-ink transition-colors hover:border-cyan/50">
+          <form onSubmit={submit} className="privacy-notice-form mt-5 space-y-4">
+            <label className="privacy-notice-consent flex cursor-pointer items-start gap-3 rounded-xl border hairline bg-ink/5 p-4 text-sm leading-6 text-ink transition-colors hover:border-cyan/50">
               <input
                 type="checkbox"
                 required
@@ -141,7 +141,7 @@ export default function PrivacyNotice({
               type="submit"
               disabled={!accepted || declineBusy}
               variant="primary"
-              className="min-h-12 w-full rounded-xl text-sm"
+              className="privacy-notice-accept min-h-12 w-full rounded-xl text-sm"
             >
               {t('privacyAgree')}
             </Button>
@@ -151,7 +151,7 @@ export default function PrivacyNotice({
             type="button"
             disabled={declineBusy}
             onClick={onDecline}
-            className="mt-3 inline-flex min-h-9 items-center gap-2 text-sm font-medium text-muted hover:text-ink disabled:cursor-wait"
+            className="privacy-notice-decline mt-3 inline-flex min-h-9 items-center gap-2 text-sm font-medium text-muted hover:text-ink disabled:cursor-wait"
           >
             <ArrowLeft className="size-4" aria-hidden="true" />
             {declineBusy ? t('privacySigningOut') : t('privacyReturnToLogin')}

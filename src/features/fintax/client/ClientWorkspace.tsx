@@ -9,19 +9,19 @@ import {
 import { Badge, Button } from '@/components/ui/primitives';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  categoryForFilename, detectDocumentLanguage, emptyDemoFields, extractDocumentFields,
+  categoryFromDocumentText, categoryForFilename, detectDocumentLanguage, emptyDemoFields, extractDocumentFields,
   extractDocumentDetails, CLIENT_MAX_UPLOAD_BYTES, validateDemoFile,
-  type DemoCategory, type DemoDocument,
+  DEMO_CATEGORIES, type DemoCategory, type DemoDocument,
 } from '../shared/demoWorkflow';
 import { useDemoDocumentsStore } from '@/stores/demoDocumentsStore';
-import { DEMO_CLIENTS } from '../shared/demoAccounts';
 import { clientProfileFor } from '../shared/clientDemoData';
 import { checklistBlockers, folderPathForCategory, isChecklistComplete } from '../shared/storage/periods';
 import { currentDemoPeriodId } from '../shared/storage/seedPeriods';
 import { documentsVisibleTo } from '../shared/storage/selectors';
-import fintaxLogo from '../shared/fintax-logo.png';
 import type { AssistantLanguage } from './clientAssistant';
+import LocalizedFinTaxLogo from '../shared/LocalizedFinTaxLogo';
 import ClientDocumentUploadPage, { AREA_CHECKBOXES, uploadTypeForCategory } from './pages/ClientDocumentUploadPage';
+import { createClientUploadQueue, type QueuedClientUpload } from './clientUploadQueue';
 import ClientDashboardPage from './pages/ClientDashboardPage';
 import type { ClientDocumentFilter } from './pages/ClientDocumentHistoryPage';
 import { areaOf } from './clientUi';
@@ -100,7 +100,7 @@ export default function ClientWorkspace({
   const storageError = useDemoDocumentsStore((state) => state.storageError);
   const quotaWarning = useDemoDocumentsStore((state) => state.quotaWarning);
   const respondToRequest = useDemoDocumentsStore((state) => state.respondToRequest);
-  const [activeClientEmail, setActiveClientEmail] = useState(clientEmail);
+  const activeClientEmail = clientEmail;
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null);
   const activeClient = clientProfileFor(activeClientEmail);
   const documents = documentsVisibleTo(allDocuments, 'client', activeClientEmail);
@@ -140,8 +140,8 @@ export default function ClientWorkspace({
   const clientPage: 'dashboard' | 'documents' = location.pathname.endsWith('/documents') ? 'documents' : 'dashboard';
   const [uploadArea, setUploadArea] = useState<'formation' | 'payroll' | 'accounting' | 'correspondence'>('accounting');
   const [uploadNote, setUploadNote] = useState('');
-  const [category, setCategory] = useState<DemoCategory>('other');
-  const [uploadTypeId, setUploadTypeId] = useState('a-purchase');
+  const [selectedUploadTypeIds, setSelectedUploadTypeIds] = useState(['a-purchase']);
+  const [queuedUploads, setQueuedUploads] = useState<QueuedClientUpload[]>([]);
   const [uploadOpen, setUploadOpen] = useState(() => location.pathname.endsWith('/upload'));
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraLoading, setCameraLoading] = useState(false);
@@ -149,7 +149,7 @@ export default function ClientWorkspace({
   const [reviewTargetId, setReviewTargetId] = useState<string | null>(null);
   const [themeMode, setThemeMode] = useState<'light' | 'dark' | 'system'>(() => {
     const saved = localStorage.getItem('fintax-client-theme');
-    return saved === 'light' || saved === 'dark' ? saved : 'system';
+    return saved === 'light' || saved === 'dark' || saved === 'system' ? saved : 'light';
   });
   const [systemDarkMode, setSystemDarkMode] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
   const darkMode = themeMode === 'system' ? systemDarkMode : themeMode === 'dark';
@@ -404,11 +404,11 @@ export default function ClientWorkspace({
   const hour = new Date().getHours();
   const greeting = t3(lang, hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening', hour < 12 ? 'Guten Morgen' : hour < 18 ? 'Guten Tag' : 'Guten Abend', hour < 12 ? 'صباح الخير' : 'مساء الخير');
   const pageSections = [
-    { id: 'client-overview', label: 'Overview', icon: BarChart3 },
-    { id: 'client-demo-tasks', label: 'Tasks', icon: ListChecks },
-    ...(activity.length ? [{ id: 'client-advisor-updates', label: 'Advisor updates', icon: CalendarClock }] : []),
-    { id: 'client-upload', label: 'Upload documents', icon: Upload },
-    { id: 'client-documents', label: 'Document history', icon: FolderOpen },
+    { id: 'client-overview', label: t3(lang, 'Overview', 'Übersicht', 'نظرة عامة'), icon: BarChart3 },
+    { id: 'client-demo-tasks', label: t3(lang, 'Tasks', 'Aufgaben', 'المهام'), icon: ListChecks },
+    ...(activity.length ? [{ id: 'client-advisor-updates', label: t3(lang, 'Advisor updates', 'Neuigkeiten vom Berater', 'تحديثات المستشار'), icon: CalendarClock }] : []),
+    { id: 'client-upload', label: t3(lang, 'Upload documents', 'Dokumente hochladen', 'رفع المستندات'), icon: Upload },
+    { id: 'client-documents', label: t3(lang, 'Document history', 'Dokumentenverlauf', 'سجل المستندات'), icon: FolderOpen },
   ];
 
   useEffect(() => {
@@ -442,12 +442,8 @@ export default function ClientWorkspace({
     const nextTypeId = typeId ?? (nextCategory
       ? uploadTypeForCategory(nextArea, nextCategory)
       : AREA_CHECKBOXES[nextArea][0].id);
-    const nextSelectedCategory = nextCategory
-      ?? AREA_CHECKBOXES[nextArea].find((item) => item.id === nextTypeId)?.category
-      ?? category;
     setUploadArea(nextArea);
-    setCategory(nextSelectedCategory);
-    setUploadTypeId(nextTypeId);
+    setSelectedUploadTypeIds([nextTypeId]);
     setReviewTargetId(null);
     setUploadOpen(true);
     setUploadError('');
@@ -474,7 +470,7 @@ export default function ClientWorkspace({
     setNotice(`Processing canceled for ${item.name}.`);
   };
 
-  const processFiles = async (files: FileList | File[]) => {
+  const processFiles = async (uploads: QueuedClientUpload[]) => {
     setUploadError(''); setNotice('');
     setReviewTargetId(null);
     if (!useDemoDocumentsStore.getState().storageHydrated) {
@@ -492,8 +488,11 @@ export default function ClientWorkspace({
     const accepted: DemoDocument[] = [];
     const rejected: string[] = [];
     const processingErrors: string[] = [];
+    const processedIds: string[] = [];
+    let processedCount = 0;
     const targetReplacement = replacementFor.current;
-    for (const file of Array.from(files)) {
+    for (const queuedUpload of uploads) {
+      const { file, category: uploadCategory } = queuedUpload;
       const issue = validateDemoFile(file, CLIENT_MAX_UPLOAD_BYTES);
       if (issue) { rejected.push(`${file.name}: ${issue}`); continue; }
       const existingDuplicate = documents.find((d) => d.name.toLowerCase() === file.name.toLowerCase() && d.id !== targetReplacement);
@@ -505,14 +504,14 @@ export default function ClientWorkspace({
         previousVersions.push({ id: existingDuplicate.id, name: existingDuplicate.name, uploadedAt: existingDuplicate.createdAt, sizeBytes: existingDuplicate.sizeBytes });
       }
       const id = `CLIENT-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
-      const selectedCategory = category === 'other' ? categoryForFilename(file.name) : category;
+      const selectedCategory = uploadCategory === 'other' ? categoryForFilename(file.name) : uploadCategory;
       const doc: DemoDocument = {
         id, name: file.name, category: selectedCategory, periodId: activePeriod.id,
         folder: folderPathForCategory(selectedCategory, activePeriod.year, activePeriod.month), mime: file.type,
         sizeBytes: file.size, createdAt: new Date().toISOString(), status: 'processing', confidence: 0,
         fields: emptyDemoFields(), sample: false, clientSaved: false, clientId: activeClientEmail, currency: activeClient.currency, workflowStage: 'received', detectedLanguage: 'Detecting locally',
         validationWarnings: [], reviewHistory: [{ at: new Date().toISOString(), action: 'Received', details: 'Added in the browser-only demo session.' }],
-        file, processingProgress: 0, note: 'The original is being saved to this browser’s IndexedDB.', clientNote: uploadNote.trim() || undefined, replacementFor: targetReplacement, area: uploadArea, previousVersions: previousVersions.length ? previousVersions : undefined,
+        file, processingProgress: 0, note: 'The original is being saved to this browser’s IndexedDB.', clientNote: uploadNote.trim() || undefined, replacementFor: targetReplacement, area: queuedUpload.area, previousVersions: previousVersions.length ? previousVersions : undefined,
       };
       if (targetReplacement) {
         const previous = useDemoDocumentsStore.getState().documents.find((e) => e.id === targetReplacement);
@@ -573,7 +572,8 @@ export default function ClientWorkspace({
           if (!password) throw new Error('Password entry was cancelled. Upload an unlocked copy to continue.');
           extraction = await process(password);
         }
-        const detectedCategory = doc.category === 'other' ? categoryForFilename(doc.name, extraction.text) : doc.category;
+        const textCategory = categoryFromDocumentText(extraction.text);
+        const detectedCategory = textCategory ?? (doc.category === 'other' ? categoryForFilename(doc.name) : doc.category);
         const detectedLanguage = detectDocumentLanguage(extraction.text);
         const documentFields = extractDocumentFields(detectedCategory, extraction.text, doc.name);
         const extracted: DemoDocument = {
@@ -592,9 +592,13 @@ export default function ClientWorkspace({
         };
         stage('checks', 'Running simple field-presence and amount checks. These are not accounting controls.', 88);
         const warnings = validationWarnings(extracted);
+        if (textCategory && doc.category !== 'other' && textCategory !== doc.category) {
+          warnings.unshift(`The extracted text indicates this is a ${DEMO_CATEGORIES.find(([key]) => key === textCategory)?.[1] ?? 'different document type'}, not the selected type. The document was reclassified automatically; verify the type and extracted fields before sending.`);
+        }
         await new Promise((r) => window.setTimeout(r, 320));
         stage('confidence', 'Confidence is a rule-based text-match estimate, not an AI score.', 95);
         updateDocument(doc.id, {
+          status: 'review',
           category: detectedCategory,
           folder: extracted.folder,
           fields: documentFields.fields,
@@ -610,6 +614,8 @@ export default function ClientWorkspace({
           processingProgress: 100,
           note: `${extraction.note} Review the extracted text and fields, then save to share with your FinTax team.`,
         });
+        processedCount += 1;
+        processedIds.push(doc.id);
       } catch (error) {
         if (controller.signal.aborted) {
           cancelledUploadIds.current.delete(doc.id);
@@ -627,19 +633,19 @@ export default function ClientWorkspace({
         const message = error instanceof Error ? error.message : 'The file could not be read.';
         const reason = passwordRequired
           ? 'This PDF is password-protected or the password was incorrect. Please provide the correct password or upload an unlocked copy.'
-          : message;
+          : message.includes('upload it again') ? message : `${message} Please upload the file again.`;
         processingErrors.push(`${doc.name}: ${reason}`);
         updateDocument(doc.id, { status: passwordRequired ? 'password_required' : 'action_required', workflowStage: 'staff_review', validationWarnings: [reason], clientRequest: { reason, createdAt: new Date().toISOString() }, note: message });
       }
       uploadControllers.current.delete(doc.id);
     }
-    if (accepted.length) {
-      const latestUploadId = accepted[accepted.length - 1].id;
+    if (processedCount) {
+      const latestUploadId = processedIds[processedIds.length - 1];
       setExpandedId(latestUploadId);
       setFilter('all');
       setNotice(cancelledNames.length
         ? `${cancelledNames.length} file${cancelledNames.length === 1 ? '' : 's'} canceled; remaining queued files finished processing.`
-        : `${accepted.length} file${accepted.length === 1 ? '' : 's'} processed. Review the extracted text and save each document to share it with your team.`);
+        : `${processedCount} file${processedCount === 1 ? '' : 's'} processed. Review the extracted text and save each document to share it with your team.`);
       const firstNeedsReview = accepted.find((item) => {
         const processed = useDemoDocumentsStore.getState().documents.find((current) => current.id === item.id);
         return processed?.clientSaved === false && processed.extractedText !== undefined;
@@ -655,7 +661,9 @@ export default function ClientWorkspace({
       setUploadError(currentStorageError || 'Browser storage is still preparing. Wait a moment before saving.');
       return;
     }
-    const detectedCategory = document.category === 'other' ? categoryForFilename(document.name, extractedText) : document.category;
+    const detectedCategory = document.category === 'other'
+      ? categoryFromDocumentText(extractedText) ?? categoryForFilename(document.name, extractedText)
+      : document.category;
     const updatedDocument: DemoDocument = {
       ...document,
       category: detectedCategory,
@@ -688,9 +696,44 @@ export default function ClientWorkspace({
   const handleFiles = (e: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.currentTarget.files ?? []);
     e.currentTarget.value = '';
-    if (files.length) void processFiles(files);
+    if (files.length) queueFiles(files);
   };
-  const handleDrop = (e: DragEvent<HTMLElement>) => { e.preventDefault(); e.stopPropagation(); setDragOver(false); void processFiles(e.dataTransfer.files); };
+  const queueFiles = (files: FileList | File[]) => {
+    const selectedTypes = AREA_CHECKBOXES[uploadArea]
+      .filter((type) => selectedUploadTypeIds.includes(type.id))
+      .map(({ id, category: selectedCategory }) => ({ id, category: selectedCategory }));
+    const result = createClientUploadQueue(Array.from(files), uploadArea, selectedTypes);
+    if (result.queued.length) {
+      setQueuedUploads((current) => [...current, ...result.queued]);
+      setUploadOpen(true);
+      setUploadError('');
+      setNotice('');
+    }
+    if (result.rejected.length) setUploadError(result.rejected.join(' '));
+  };
+  const submitQueuedUploads = () => {
+    if (!queuedUploads.length) {
+      fileInput.current?.click();
+      return;
+    }
+    if (!storageHydrated || storageError || !activePeriod || periodReadOnly) {
+      setUploadError(storageError
+        ? `Browser storage is unavailable. Fix the storage issue before uploading: ${storageError}`
+        : !activePeriod || periodReadOnly
+          ? 'This month is read-only. Select an open month before uploading documents.'
+          : 'Browser storage is still preparing. Wait a moment, then try the upload again.');
+      return;
+    }
+    const uploads = queuedUploads;
+    setQueuedUploads([]);
+    void processFiles(uploads);
+  };
+  const handleDrop = (e: DragEvent<HTMLElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    queueFiles(e.dataTransfer.files);
+  };
   const openCamera = () => {
     setCameraLoading(true);
     setCameraError('');
@@ -718,7 +761,7 @@ export default function ClientWorkspace({
     }
     const file = new File([image], `fintax-camera-${new Date().toISOString().replace(/[:.]/g, '-')}.jpg`, { type: 'image/jpeg' });
     closeCamera();
-    await processFiles([file]);
+    queueFiles([file]);
   };
   const useDeviceCamera = () => {
     cameraInput.current?.click();
@@ -791,38 +834,33 @@ export default function ClientWorkspace({
       </div>}
       <header data-scrolled={headerScrolled} className="client-topbar sticky top-0 z-30 bg-[#f7f4ec]/95 px-2 pt-2 sm:px-4">
         <div className="client-topbar-card mx-auto flex max-w-6xl flex-wrap items-center gap-x-2 gap-y-2 rounded-2xl border border-[#e8e2d2] bg-white px-3 py-2.5 shadow-sm sm:gap-3 sm:px-5 sm:py-3">
-          <button type="button" aria-label="Open page navigation" aria-controls="client-page-navigation" aria-expanded={navigationOpen} onClick={() => setNavigationOpen(true)}
+          <button type="button" aria-label={t3(lang, 'Open page navigation', 'Seitennavigation öffnen', 'فتح تنقل الصفحة')} aria-controls="client-page-navigation" aria-expanded={navigationOpen} onClick={() => setNavigationOpen(true)}
             className="grid size-10 shrink-0 place-items-center rounded-xl border border-[#e8e2d2] bg-white text-slate-600 transition-colors hover:text-[#9a7424]">
             <Menu className="size-4" />
           </button>
-          <img src={fintaxLogo} alt="FinTax Consulting" className="client-mobile-logo brand-logo h-auto w-28 shrink-0 object-contain sm:w-32" />
-          <div className="client-topbar-brand min-w-0 flex-1"><p className="truncate text-sm font-semibold leading-tight">{activeClient.name}</p><p className="client-topbar-subtitle max-w-36 truncate text-xs text-slate-500">Client workspace</p></div>
-          <button type="button" aria-label="Open account and settings" onClick={() => setNavigationOpen(true)}
+          <LocalizedFinTaxLogo language={lang} className="client-mobile-logo client-localized-logo shrink-0" />
+          <div className="client-topbar-brand min-w-0 flex-1"><p className="truncate text-sm font-semibold leading-tight">{activeClient.name}</p><p className="client-topbar-subtitle max-w-36 truncate text-xs text-slate-500">{t3(lang, 'Client workspace', 'Kundenbereich', 'مساحة العميل')}</p></div>
+          <button type="button" aria-label={t3(lang, 'Open account and settings', 'Konto und Einstellungen öffnen', 'فتح الحساب والإعدادات')} onClick={() => setNavigationOpen(true)}
             className="client-mobile-avatar hidden size-10 shrink-0 place-items-center rounded-full border border-[#e8e2d2] bg-white text-[#0F1B3D]">
             <UserRound className="size-[18px]" />
           </button>
           <nav aria-label="Quick client navigation" className="hidden items-center gap-0.5 rounded-full bg-slate-100/80 p-1 xl:flex">
             {pageSections.filter(({ id }) => ['client-overview', 'client-upload', 'client-documents', 'client-demo-tasks'].includes(id)).map(({ id, label }) => (
-              <button key={id} type="button" onClick={() => goToPageSection(id)} className="rounded-full px-2.5 py-1.5 text-[10px] font-medium text-slate-600 transition-colors hover:bg-white hover:text-slate-900">{id === 'client-upload' ? 'Upload' : id === 'client-documents' ? 'Documents' : label}</button>
+              <button key={id} type="button" onClick={() => goToPageSection(id)} className="rounded-full px-2.5 py-1.5 text-[10px] font-medium text-slate-600 transition-colors hover:bg-white hover:text-slate-900">{id === 'client-upload' ? t3(lang, 'Upload', 'Hochladen', 'رفع') : id === 'client-documents' ? t3(lang, 'Documents', 'Dokumente', 'المستندات') : label}</button>
             ))}
           </nav>
           <div className="client-header-controls flex w-full min-w-0 items-center gap-2 sm:ms-auto sm:w-auto sm:gap-2">
-            <label className="client-header-control flex min-w-0 flex-1 items-center text-[10px] text-muted sm:flex-none sm:gap-1.5 sm:text-xs"><span className="hidden sm:inline">Demo client</span>
-              <select value={activeClientEmail} onChange={(e) => setActiveClientEmail(e.target.value)} aria-label="Select fictional client data" className="h-10 w-full min-w-0 rounded-xl border border-[#e8e2d2] bg-white px-2.5 text-xs text-[#0f1f3d] sm:w-auto sm:max-w-40 sm:px-3 lg:max-w-52">
-                {DEMO_CLIENTS.map((c) => <option key={c.email} value={c.email}>{c.company}</option>)}
-              </select>
-            </label>
-            <label className="client-header-control flex h-10 shrink-0 items-center gap-1 rounded-xl border border-[#e8e2d2] bg-white px-2 sm:gap-1.5 sm:px-2.5"><Languages className="size-4 text-[#9a7424]" /><span className="sr-only">Language</span>
+            <label className="client-header-control flex h-10 shrink-0 items-center gap-1 rounded-xl border border-[#e8e2d2] bg-white px-2 sm:gap-1.5 sm:px-2.5"><Languages className="size-4 text-[#9a7424]" /><span className="sr-only">{t3(lang, 'Language', 'Sprache', 'اللغة')}</span>
               <select value={lang} onChange={(event) => {
                 const next = event.target.value;
                 if (next === 'en' || next === 'de' || next === 'ar') setLang(next);
-              }} aria-label="Assistant language" className="h-9 max-w-[5.25rem] bg-transparent text-xs text-ink sm:max-w-[4.75rem] lg:max-w-none"><option value="en">English (EN)</option><option value="de">Deutsch (DE)</option><option value="ar">العربية (AR)</option></select></label>
+              }} aria-label={t3(lang, 'Language', 'Sprache', 'اللغة')} className="h-9 max-w-[5.25rem] bg-transparent text-xs text-ink sm:max-w-[4.75rem] lg:max-w-none"><option value="en">English (EN)</option><option value="de">Deutsch (DE)</option><option value="ar">العربية (AR)</option></select></label>
             <Button size="sm" variant="outline" aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'} title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'} className="client-header-control size-10 shrink-0 rounded-xl border border-[#e8e2d2] bg-white p-0" onClick={() => {
               const next = darkMode ? 'light' : 'dark';
               localStorage.setItem('fintax-client-theme', next);
               setThemeMode(next);
             }} icon={darkMode ? <Sun className="size-4" /> : <Moon className="size-4" />} />
-            <Button size="sm" aria-label="Log out" title="Log out" className="client-header-control size-10 shrink-0 rounded-xl border border-[#e8e2d2] bg-white p-0 sm:size-auto sm:px-3" onClick={onSignOut} icon={<LogOut className="size-3.5" />}><span className="sr-only sm:not-sr-only">Logout</span></Button>
+            <Button size="sm" aria-label={t3(lang, 'Log out', 'Abmelden', 'تسجيل الخروج')} title={t3(lang, 'Log out', 'Abmelden', 'تسجيل الخروج')} className="client-header-control size-10 shrink-0 rounded-xl border border-[#e8e2d2] bg-white p-0 sm:size-auto sm:px-3" onClick={onSignOut} icon={<LogOut className="size-3.5" />}><span className="sr-only sm:not-sr-only">{t3(lang, 'Log out', 'Abmelden', 'تسجيل الخروج')}</span></Button>
           </div>
         </div>
       </header>
@@ -835,56 +873,68 @@ export default function ClientWorkspace({
           <motion.aside id="client-page-navigation" aria-label="Client page navigation"
             initial={reduce ? false : { x: '-100%' }} animate={{ x: 0 }} exit={{ x: '-100%' }}
             transition={{ type: 'spring', stiffness: 360, damping: 34 }}
-            className="fixed inset-y-0 start-0 z-50 flex w-[min(21rem,88vw)] flex-col border-e border-[#e8e2d2] bg-white p-5 shadow-2xl">
-            <div className="flex items-center gap-3 border-b border-ink/5 pb-5">
-              <img src={fintaxLogo} alt="FinTax Consulting" className="brand-logo h-auto w-32 shrink-0 object-contain" />
-              <div className="min-w-0 flex-1"><p className="text-sm font-semibold">Client workspace</p><p className="truncate text-xs text-muted">{activeClient.company}</p></div>
-              <button type="button" aria-label="Close page navigation" onClick={() => setNavigationOpen(false)}
+            className="client-navigation-drawer fixed inset-y-0 start-0 z-50 flex h-[100dvh] max-h-[100dvh] w-[min(24rem,94vw)] flex-col overflow-hidden border-e border-[#e8e2d2] bg-white px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl">
+            <div className="client-navigation-header flex shrink-0 items-center gap-3 border-b border-ink/5 pb-5">
+              <LocalizedFinTaxLogo language={lang} className="shrink-0" />
+              <div className="min-w-0 flex-1"><p className="text-sm font-semibold">{t3(lang, 'Client workspace', 'Kundenbereich', 'مساحة العميل')}</p><p className="truncate text-xs text-muted">{activeClient.company}</p></div>
+              <button type="button" aria-label={t3(lang, 'Close page navigation', 'Seitennavigation schließen', 'إغلاق تنقل الصفحة')} onClick={() => setNavigationOpen(false)}
                 className="grid size-9 place-items-center rounded-full text-muted transition-colors hover:bg-ink/5 hover:text-ink"><X className="size-4" /></button>
             </div>
-            <div className="my-4 grid grid-cols-2 gap-2">
-              <div className="rounded-xl bg-violet/5 p-3"><p className="text-lg font-semibold">{documents.length}</p><p className="text-[10px] text-muted">Documents</p></div>
-              <div className="rounded-xl bg-warn/5 p-3"><p className="text-lg font-semibold">{attention.length}</p><p className="text-[10px] text-muted">Need attention</p></div>
+            <div className="client-navigation-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain">
+              <div className="client-navigation-metrics my-4 grid grid-cols-2 gap-2">
+                <div className="rounded-xl bg-violet/5 p-3"><p className="text-lg font-semibold">{documents.length}</p><p className="text-[10px] text-muted">{t3(lang, 'Documents', 'Dokumente', 'المستندات')}</p></div>
+                <div className="rounded-xl bg-warn/5 p-3"><p className="text-lg font-semibold">{attention.length}</p><p className="text-[10px] text-muted">{t3(lang, 'Need attention', 'Benötigt Aufmerksamkeit', 'يتطلب الانتباه')}</p></div>
+              </div>
+              <nav aria-label={t3(lang, 'Client workspace sections', 'Bereiche des Kundenbereichs', 'أقسام مساحة العميل')} className="space-y-1">
+                <p className="client-navigation-label mb-2 px-3 text-[10px] font-semibold uppercase tracking-[.14em] text-muted">{t3(lang, 'Workspace', 'Arbeitsbereich', 'مساحة العمل')}</p>
+                {pageSections.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => goToPageSection(id)}
+                  aria-current={activeBottomSection === id ? 'location' : undefined}
+                  className={`client-navigation-link flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-start text-sm text-ink transition-colors hover:bg-violet/8 hover:text-violet focus-visible:outline-violet ${activeBottomSection === id ? 'bg-violet/8 font-semibold text-violet' : ''}`}>
+                  <Icon className="size-4 shrink-0 text-violet" /><span>{label}</span>
+                  {id === 'client-documents' && <span className="ms-auto text-xs text-muted">{documents.length}</span>}
+                  {id === 'client-demo-tasks' && <span className="ms-auto text-xs text-muted">{activeClient.tasks.filter((task) => !task.complete).length}</span>}
+                </button>)}
+              </nav>
+              <div className="client-navigation-settings mt-4 space-y-3 border-t border-[#e8e2d2] pt-4">
+                <p className="client-navigation-label col-span-full px-1 text-[10px] font-semibold uppercase tracking-[.14em] text-muted">{t3(lang, 'Preferences', 'Einstellungen', 'التفضيلات')}</p>
+                <label className="block text-xs font-medium text-[#4A5468]">{t3(lang, 'Language', 'Sprache', 'اللغة')}
+                  <select value={lang} onChange={(event) => {
+                    const next = event.target.value;
+                    if (next === 'en' || next === 'de' || next === 'ar') setLang(next);
+                  }} aria-label="Portal language" className="mt-1 h-11 w-full rounded-xl border border-[#e8e2d2] bg-white px-3 text-sm text-[#0F1B3D]"><option value="en">English</option><option value="de">Deutsch</option><option value="ar">العربية</option></select>
+                </label>
+                <label className="block text-xs font-medium text-[#4A5468]">{t3(lang, 'Theme', 'Darstellung', 'المظهر')}
+                  <select value={themeMode} onChange={(event) => {
+                    const next = event.target.value;
+                    if (next === 'light' || next === 'dark' || next === 'system') {
+                      localStorage.setItem('fintax-client-theme', next);
+                      setThemeMode(next);
+                    }
+                  }} aria-label={t3(lang, 'Color theme', 'Farbschema', 'سمة الألوان')} className="mt-1 h-11 w-full rounded-xl border border-[#e8e2d2] bg-white px-3 text-sm text-[#0F1B3D]"><option value="system">{t3(lang, 'System', 'System', 'النظام')}</option><option value="light">{t3(lang, 'Light', 'Hell', 'فاتح')}</option><option value="dark">{t3(lang, 'Dark', 'Dunkel', 'داكن')}</option></select>
+                </label>
+              </div>
+              <details className="client-navigation-about my-4 rounded-xl border border-violet/10 bg-gradient-to-br from-violet/5 to-blue/5 p-3">
+                <summary className="cursor-pointer text-xs font-semibold">{t3(lang, 'About this workspace', 'Über diesen Arbeitsbereich', 'حول مساحة العمل هذه')}</summary>
+                <p className="mt-2 text-[11px] leading-5 text-muted">{t3(lang, 'A browser-only FinTax demo using fictional client records. Documents and monthly periods are saved in this browser’s IndexedDB and are not sent to a server.', 'Eine reine Browser-Demo von FinTax mit fiktiven Kundendaten. Dokumente und Monatszeiträume werden in der IndexedDB dieses Browsers gespeichert und nicht an einen Server gesendet.', 'عرض FinTax تجريبي داخل المتصفح باستخدام بيانات عملاء افتراضية. تُحفظ المستندات والفترات الشهرية في قاعدة بيانات المتصفح ولا تُرسل إلى خادم.')}</p>
+              </details>
             </div>
-            <nav aria-label="Client workspace sections" className="space-y-1">
-              <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[.14em] text-muted">This page</p>
-              {pageSections.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => goToPageSection(id)}
-                className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-start text-sm text-ink transition-colors hover:bg-violet/8 hover:text-violet focus-visible:outline-violet">
-                <Icon className="size-4 shrink-0 text-violet" /><span>{label}</span>
-                {id === 'client-documents' && <span className="ms-auto text-xs text-muted">{documents.length}</span>}
-                {id === 'client-demo-tasks' && <span className="ms-auto text-xs text-muted">{activeClient.tasks.filter((task) => !task.complete).length}</span>}
-              </button>)}
-            </nav>
-            <div className="mt-4 space-y-3 border-t border-[#e8e2d2] pt-4">
-              <label className="block text-xs font-medium text-[#4A5468]">Demo client
-                <select value={activeClientEmail} onChange={(event) => setActiveClientEmail(event.target.value)} aria-label="Select fictional client data" className="mt-1 h-11 w-full rounded-xl border border-[#e8e2d2] bg-white px-3 text-sm text-[#0F1B3D]">
-                  {DEMO_CLIENTS.map((client) => <option key={client.email} value={client.email}>{client.company}</option>)}
-                </select>
-              </label>
-              <label className="block text-xs font-medium text-[#4A5468]">Language
-                <select value={lang} onChange={(event) => {
-                  const next = event.target.value;
-                  if (next === 'en' || next === 'de' || next === 'ar') setLang(next);
-                }} aria-label="Portal language" className="mt-1 h-11 w-full rounded-xl border border-[#e8e2d2] bg-white px-3 text-sm text-[#0F1B3D]"><option value="en">English</option><option value="de">Deutsch</option><option value="ar">العربية</option></select>
-              </label>
-              <label className="block text-xs font-medium text-[#4A5468]">Theme
-                <select value={themeMode} onChange={(event) => {
-                  const next = event.target.value;
-                  if (next === 'light' || next === 'dark' || next === 'system') {
-                    localStorage.setItem('fintax-client-theme', next);
-                    setThemeMode(next);
-                  }
-                }} aria-label="Color theme" className="mt-1 h-11 w-full rounded-xl border border-[#e8e2d2] bg-white px-3 text-sm text-[#0F1B3D]"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select>
-              </label>
-              <button type="button" onClick={onSignOut} className="flex min-h-11 w-full items-center gap-2 rounded-xl border border-[#e8e2d2] px-3 text-sm font-medium text-[#4A5468] hover:bg-[#F7F4EC]"><LogOut className="size-4" />Log out</button>
-              <button type="button" onClick={() => {
-                openHelpGuide();
-                setNavigationOpen(false);
-              }} className="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 text-sm font-medium text-[#4A5468] hover:bg-[#F7F4EC]"><CircleAlert className="size-4" />Help guide</button>
-            </div>
-            <div className="mt-auto rounded-xl border border-violet/10 bg-gradient-to-br from-violet/5 to-blue/5 p-3.5">
-              <p className="text-xs font-semibold">About this workspace</p>
-              <p className="mt-1 text-[11px] leading-5 text-muted">A browser-only FinTax demo using fictional client records. Documents and monthly periods are saved in this browser’s IndexedDB and are not sent to a server.</p>
+            <div className="client-navigation-footer shrink-0 border-t border-[#e8e2d2] pt-3">
+              <div className="client-navigation-profile flex min-w-0 items-center gap-3 rounded-xl px-2 py-2">
+                <span aria-hidden="true" className="grid size-10 shrink-0 place-items-center rounded-full bg-[#0B7F99]/10 text-sm font-semibold text-[#0B7F99]">
+                  {activeClient.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase()}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold">{activeClient.name}</span>
+                  <span className="block truncate text-xs text-muted">{activeClient.company}</span>
+                </span>
+              </div>
+              <div className="client-navigation-actions mt-2 grid grid-cols-2 gap-2">
+                <button type="button" onClick={() => {
+                  openHelpGuide();
+                  setNavigationOpen(false);
+                }} className="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-[#e8e2d2] px-3 text-sm font-medium text-[#4A5468] transition-colors hover:bg-[#F7F4EC]"><CircleAlert className="size-4" />{t3(lang, 'Help guide', 'Hilfe', 'دليل المساعدة')}</button>
+                <button type="button" onClick={onSignOut} className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#0F1B3D] px-3 text-sm font-medium text-white transition-colors hover:bg-[#1B3160]"><LogOut className="size-4" />{t3(lang, 'Log out', 'Abmelden', 'تسجيل الخروج')}</button>
+              </div>
             </div>
           </motion.aside>
         </>}
@@ -1029,10 +1079,10 @@ export default function ClientWorkspace({
         {!uploadOpen && !navigationOpen && !cameraOpen && !keyboardOpen && !helpBotOpen && <nav aria-label="Client page navigation" className="client-bottom-nav mx-auto w-full max-w-md md:hidden">
           <ul className="workspace-bottom-dock grid grid-cols-4">
             {[
-              { id: 'client-overview', label: 'Overview', icon: BarChart3 },
-              { id: 'client-demo-tasks', label: 'Tasks', icon: ListChecks },
-              { id: 'client-upload', label: 'Upload', icon: Upload },
-              { id: 'client-documents', label: 'Documents', icon: FolderOpen },
+              { id: 'client-overview', label: t3(lang, 'Overview', 'Übersicht', 'نظرة عامة'), icon: BarChart3 },
+              { id: 'client-demo-tasks', label: t3(lang, 'Tasks', 'Aufgaben', 'المهام'), icon: ListChecks },
+              { id: 'client-upload', label: t3(lang, 'Upload', 'Hochladen', 'رفع'), icon: Upload },
+              { id: 'client-documents', label: t3(lang, 'Documents', 'Dokumente', 'المستندات'), icon: FolderOpen },
             ].map(({ id, label, icon: Icon }) => {
               const isUpload = id === 'client-upload';
               const active = activeBottomSection === id;
@@ -1040,7 +1090,7 @@ export default function ClientWorkspace({
                 <li key={id}>
                   <button
                     type="button"
-                    aria-label={isUpload ? 'Upload a document' : `Go to ${label}`}
+                    aria-label={isUpload ? t3(lang, 'Upload a document', 'Dokument hochladen', 'رفع مستند') : t3(lang, `Go to ${label}`, `Zu ${label} wechseln`, `الانتقال إلى ${label}`)}
                     aria-current={active ? 'location' : undefined}
                     onClick={() => goToPageSection(id)}
                     className={`workspace-bottom-tab min-h-14 ${isUpload ? 'workspace-bottom-tab--featured' : ''} ${active ? 'is-active' : ''}`}
@@ -1104,11 +1154,11 @@ export default function ClientWorkspace({
             <div className="client-upload-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white px-5 py-4 sm:px-6">
               <ClientDocumentUploadPage
                 activePeriodDocuments={activePeriodDocuments}
+                queuedUploads={queuedUploads}
                 pendingDocuments={activePeriodDocuments.filter((document) => document.clientSaved === false && document.extractedText !== undefined)}
                 storageReady={storageHydrated && !storageError}
                 storageError={storageError}
-                category={category}
-                selectedTypeId={uploadTypeId}
+                selectedTypeIds={selectedUploadTypeIds}
                 selectedArea={uploadArea}
                 activePeriod={activePeriod}
                 periods={clientPeriods}
@@ -1126,12 +1176,27 @@ export default function ClientWorkspace({
                 cameraInput={cameraInput}
                 primarySaveRef={primarySaveRef}
                 reviewTargetId={reviewTargetId}
-                onCategoryChange={setCategory}
                 onReviewDocument={setReviewTargetId}
-                onTypeChange={setUploadTypeId}
+                onRetryUpload={(item) => {
+                  const area = item.area ?? areaOf({ category: item.category });
+                  setUploadArea(area);
+                  setSelectedUploadTypeIds([uploadTypeForCategory(area, item.category)]);
+                  setReviewTargetId(null);
+                  setUploadError('');
+                  setNotice('');
+                  fileInput.current?.click();
+                }}
+                onSelectedTypeIdsChange={setSelectedUploadTypeIds}
                 uploadNote={uploadNote}
                 onUploadNoteChange={setUploadNote}
                 onOpenCamera={openCamera}
+                onSubmitFiles={submitQueuedUploads}
+                onRemoveQueuedFile={(id) => setQueuedUploads((current) => current.filter((upload) => upload.id !== id))}
+                onQueuedFileTypeChange={(id, typeId) => setQueuedUploads((current) => current.map((upload) => {
+                  if (upload.id !== id) return upload;
+                  const selectedType = AREA_CHECKBOXES[upload.area].find((type) => type.id === typeId);
+                  return selectedType ? { ...upload, typeId, category: selectedType.category } : upload;
+                }))}
                 onDrop={handleDrop}
                 onDragOver={() => setDragOver(true)}
                 onDragLeave={() => setDragOver(false)}
@@ -1157,6 +1222,8 @@ export default function ClientWorkspace({
                 onClick={() => {
                   if (activePeriodDocuments.some((document) => document.id === reviewTargetId && document.clientSaved === false && document.extractedText !== undefined)) {
                     primarySaveRef.current?.click();
+                  } else if (queuedUploads.length) {
+                    submitQueuedUploads();
                   } else {
                     fileInput.current?.click();
                   }

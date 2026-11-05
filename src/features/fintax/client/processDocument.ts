@@ -26,7 +26,7 @@ export interface LocalDocumentExtraction {
 }
 
 export class DocumentProcessingError extends Error {
-  constructor(message: string, public readonly code: 'password_required' | 'invalid_pdf' | 'too_many_pages' | 'unsupported_image' | 'ocr_failed') {
+  constructor(message: string, public readonly code: 'password_required' | 'invalid_pdf' | 'invalid_document' | 'unreadable_document' | 'too_many_pages' | 'unsupported_image' | 'ocr_failed') {
     super(message);
     this.name = 'DocumentProcessingError';
   }
@@ -35,6 +35,7 @@ export class DocumentProcessingError extends Error {
 const PAGE_LIMIT = 200;
 const OCR_PAGE_LIMIT = 10;
 const TEXT_LIMIT = 250_000;
+const UNREADABLE_DOCUMENT_MESSAGE = 'We could not read this file. Check that it is the correct, uncorrupted document. For a photo or scan, use a clear, upright, well-lit image, then upload it again.';
 export type OcrLanguage = 'eng' | 'deu' | 'ara' | 'eng+deu+ara' | 'deu+eng' | 'deu+eng+ara';
 
 type ProgressCallback = (progress: number, stage?: string) => void;
@@ -66,7 +67,7 @@ async function preprocessImage(file: File): Promise<HTMLCanvasElement> {
   try {
     bitmap = await createImageBitmap(file);
   } catch {
-    throw new DocumentProcessingError('This image format cannot be decoded by the browser. Convert TIFF/BMP to JPEG or PNG and try again.', 'unsupported_image');
+    throw new DocumentProcessingError('This image could not be opened. Check that it is a valid photo or scan, then upload it again. If it is TIFF or BMP, convert it to JPEG or PNG first.', 'invalid_document');
   }
   const scale = Math.min(1, 2000 / Math.max(bitmap.width, bitmap.height));
   const canvas = document.createElement('canvas');
@@ -97,6 +98,36 @@ function isPdf(file: File): boolean {
 
 function extensionOf(file: File): string {
   return file.name.toLowerCase().split('.').pop() ?? '';
+}
+
+function containsReadableText(text: string): boolean {
+  return /[\p{L}\p{N}]/u.test(text);
+}
+
+async function validateFileSignature(file: File, extension: string): Promise<void> {
+  const header = new Uint8Array(await file.slice(0, 1024).arrayBuffer());
+  const startsWith = (...bytes: number[]) => bytes.every((byte, index) => header[index] === byte);
+  const headerText = new TextDecoder('latin1').decode(header);
+
+  if (extension === 'pdf' && !headerText.includes('%PDF-')) {
+    throw new DocumentProcessingError('The file contents do not match a valid PDF. Choose the correct document and upload it again.', 'invalid_document');
+  }
+  if (['xlsx', 'docx'].includes(extension) && !startsWith(0x50, 0x4b, 0x03, 0x04)) {
+    throw new DocumentProcessingError(`The file contents do not match a valid ${extension.toUpperCase()} document. Choose the correct file and upload it again.`, 'invalid_document');
+  }
+  if (['txt', 'csv'].includes(extension)) {
+    const isKnownBinary = headerText.startsWith('%PDF-')
+      || startsWith(0x50, 0x4b, 0x03, 0x04)
+      || startsWith(0x89, 0x50, 0x4e, 0x47)
+      || startsWith(0xff, 0xd8, 0xff)
+      || startsWith(0x42, 0x4d)
+      || startsWith(0x49, 0x49, 0x2a, 0x00)
+      || startsWith(0x4d, 0x4d, 0x00, 0x2a);
+    const controlBytes = header.filter((byte) => byte === 0 || (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13)).length;
+    if (isKnownBinary || (header.length > 0 && controlBytes / header.length > 0.05)) {
+      throw new DocumentProcessingError('This does not look like a readable text or CSV file. Choose the correct document and upload it again.', 'invalid_document');
+    }
+  }
 }
 
 function decodeXml(value: string): string {
@@ -199,6 +230,9 @@ async function extractOfficeDocument(file: File, onProgress: ProgressCallback): 
     text = extension === 'csv' ? csvText(content) : content.slice(0, TEXT_LIMIT).trim();
     engine = extension === 'csv' ? 'CSV cell extraction' : 'Text file extraction';
   }
+  if (!containsReadableText(text)) {
+    throw new DocumentProcessingError(UNREADABLE_DOCUMENT_MESSAGE, 'unreadable_document');
+  }
   const extraction = extractDemoFields(text);
   onProgress(100, 'Extraction complete');
   return {
@@ -224,6 +258,10 @@ export async function processLocalDocument(
 ): Promise<LocalDocumentExtraction> {
   throwIfAborted(signal);
   const extension = extensionOf(file);
+  if (file.size === 0) {
+    throw new DocumentProcessingError('This file is empty. Choose a valid document and upload it again.', 'invalid_document');
+  }
+  await validateFileSignature(file, extension);
   if (['xlsx', 'csv', 'txt', 'docx'].includes(extension)) {
     try {
       const extraction = await extractOfficeDocument(file, onProgress);
@@ -232,7 +270,7 @@ export async function processLocalDocument(
     } catch (error) {
       if (signal?.aborted) throw new DOMException('Document processing was canceled.', 'AbortError');
       if (error instanceof DocumentProcessingError) throw error;
-      throw new DocumentProcessingError(error instanceof Error ? error.message : 'The document text could not be extracted.', 'ocr_failed');
+      throw new DocumentProcessingError(UNREADABLE_DOCUMENT_MESSAGE, 'invalid_document');
     }
   }
   const pageResults: ExtractedPage[] = [];
@@ -339,6 +377,9 @@ export async function processLocalDocument(
   const meanOcrConfidence = ocrPageResults.length
     ? ocrPageResults.reduce((total, page) => total + page.confidence, 0) / ocrPageResults.length
     : 1;
+  if (!containsReadableText(text) || (ocrPageResults.length > 0 && meanOcrConfidence < 0.2)) {
+    throw new DocumentProcessingError(UNREADABLE_DOCUMENT_MESSAGE, 'unreadable_document');
+  }
   const note = !text
     ? 'No readable text was found. Review the original and enter the fields manually.'
     : `Text was read locally with ${ocrPages.length ? 'Tesseract OCR' : 'the PDF text layer'}. Verify every extracted field against the original${pageCount && pageCount > OCR_PAGE_LIMIT && ocrPages.length === OCR_PAGE_LIMIT ? `; OCR is capped at ${OCR_PAGE_LIMIT} scanned pages per PDF` : ''}${language.includes('ara') ? '. Arabic OCR language data was requested and may be inaccurate' : ''}.`;

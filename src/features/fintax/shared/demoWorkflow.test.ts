@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  accountingCsv, canTransitionDocumentStatus, categoryForFilename, CLIENT_MAX_UPLOAD_BYTES, emptyDemoFields, extractDemoFields, extractDocumentDetails, extractDocumentFields, sampleFields, validateDemoFields, validateDemoFile,
+  accountingCsv, canTransitionDocumentStatus, categoryFromDocumentText, categoryForFilename, CLIENT_MAX_UPLOAD_BYTES, emptyDemoFields, extractDemoFields, extractDocumentDetails, extractDocumentFields, sampleFields, validateDemoFields, validateDemoFile,
   type DemoDocument,
 } from './demoWorkflow';
 
@@ -28,6 +28,13 @@ describe('demo document workflow', () => {
     expect(categoryForFilename('scan.pdf', 'Kontoauszug October')).toBe('bank_statement');
     expect(categoryForFilename('fintax-demo-invoice.pdf')).toBe('other');
     expect(categoryForFilename('invoice.pdf', 'Tax amount 19%')).toBe('other');
+  });
+
+  it('detects a mismatched document type from extracted English and German text', () => {
+    expect(categoryFromDocumentText('BANK STATEMENT\nOpening balance: EUR 1,200\nClosing balance: EUR 1,450')).toBe('bank_statement');
+    expect(categoryFromDocumentText('Lohnabrechnung\nBrutto / Netto\nMitarbeiter: Ada Example')).toBe('payroll');
+    expect(categoryFromDocumentText('Outgoing invoice\nInvoice No: INV-2026-14\nVAT amount: EUR 19.00')).toBe('sales_invoice');
+    expect(categoryFromDocumentText('A document with no clear document-type markers')).toBeNull();
   });
 
   it('extracts labeled values from locally parsed invoice text', () => {

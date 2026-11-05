@@ -16,6 +16,38 @@ describe('local document processing', () => {
     )).rejects.toMatchObject({ name: 'AbortError' });
   });
 
+  it('rejects file contents that do not match the selected document format', async () => {
+    const file = new File(['%PDF-1.7'], 'wrong-format.txt', { type: 'text/plain' });
+
+    await expect(processLocalDocument(file, () => undefined)).rejects.toMatchObject({
+      name: 'DocumentProcessingError',
+      code: 'invalid_document',
+      message: expect.stringContaining('upload it again'),
+    });
+  });
+
+  it('asks the user to upload again when a text document has no readable content', async () => {
+    const file = new File([' \n\t  '], 'blank.txt', { type: 'text/plain' });
+
+    await expect(processLocalDocument(file, () => undefined)).rejects.toMatchObject({
+      name: 'DocumentProcessingError',
+      code: 'unreadable_document',
+      message: expect.stringContaining('upload it again'),
+    });
+  });
+
+  it('rejects broken Office files with a clear re-upload instruction', async () => {
+    const file = new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04])], 'broken.docx', {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    });
+
+    await expect(processLocalDocument(file, () => undefined)).rejects.toMatchObject({
+      name: 'DocumentProcessingError',
+      code: 'invalid_document',
+      message: expect.stringContaining('upload it again'),
+    });
+  });
+
   it('extracts shared and inline XLSX cell text before upload', async () => {
     const workbook = zipSync({
       'xl/workbook.xml': new TextEncoder().encode('<workbook/>'),
