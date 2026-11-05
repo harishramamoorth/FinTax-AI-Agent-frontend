@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Building2, Copy, Download, KeyRound, Plus, Users } from 'lucide-react';
+import { ArrowRight, Building2, Copy, Download, KeyRound, Plus, Search, Users } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, ApiError } from '@/services/api';
 import { Button, Field, Input, Panel } from '@/components/ui/primitives';
 import { Badge } from '@/components/ui/primitives';
-import { useDemoDocumentsStore } from '@/stores/demoDocumentsStore';
+import { useDemoDocumentsStore, type DemoRoleAssignment } from '@/stores/demoDocumentsStore';
+import type { DemoDocument } from './demoWorkflow';
 import { DEMO_CLIENTS } from './demoAccounts';
 import { portalCategory, portalText, usePortalLanguage } from './portalLanguage';
 
@@ -213,36 +214,121 @@ function ManagedClientsPage() {
   );
 }
 
-export default function ClientsPage({ demoOnly = false }: { demoOnly?: boolean }) {
-  return demoOnly ? <DemoClientsPage /> : <ManagedClientsPage />;
+export default function ClientsPage({ demoOnly = false, onOpenDocument, onManageAccounts }: {
+  demoOnly?: boolean;
+  onOpenDocument?: (document: DemoDocument) => void;
+  onManageAccounts?: () => void;
+}) {
+  return demoOnly
+    ? <DemoClientsPage onOpenDocument={onOpenDocument} onManageAccounts={onManageAccounts} />
+    : <ManagedClientsPage />;
 }
 
-function DemoClientsPage() {
+function DemoClientsPage({ onOpenDocument, onManageAccounts }: {
+  onOpenDocument?: (document: DemoDocument) => void;
+  onManageAccounts?: () => void;
+}) {
   const documents = useDemoDocumentsStore((state) => state.documents);
+  const roleAssignments = useDemoDocumentsStore((state) => state.roleAssignments);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
-  const demoClients = DEMO_CLIENTS;
-  const pendingTotal = documents.filter((document) => ['processing', 'review'].includes(document.status)).length;
-  const attentionTotal = documents.filter((document) => ['needs_information', 'action_required', 'password_required', 'rejected'].includes(document.status)).length;
-  const completedTotal = documents.filter((document) => document.status === 'approved').length;
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'attention' | 'completed'>('all');
+  const clientByEmail = new Map<string, {
+    id: string;
+    name: string;
+    email: string;
+    country?: string;
+    demo: boolean;
+  }>();
+  DEMO_CLIENTS.forEach((client) => clientByEmail.set(client.email, {
+    id: client.id,
+    name: client.company,
+    email: client.email,
+    country: client.country,
+    demo: true,
+  }));
+  roleAssignments.filter((profile) => profile.role === 'client').forEach((profile: DemoRoleAssignment) => {
+    const existing = clientByEmail.get(profile.email);
+    clientByEmail.set(profile.email, {
+      id: profile.id,
+      name: profile.name,
+      email: profile.email,
+      country: existing?.country,
+      demo: existing?.demo ?? false,
+    });
+  });
+  const clients = [...clientByEmail.values()]
+    .map((client) => {
+      const clientDocuments = documents.filter((document) =>
+        document.clientId === client.email || document.clientId === client.id,
+      );
+      return {
+        ...client,
+        documents: clientDocuments,
+        pendingCount: clientDocuments.filter((document) => ['processing', 'review'].includes(document.status)).length,
+        attentionCount: clientDocuments.filter((document) => ['needs_information', 'action_required', 'password_required', 'rejected'].includes(document.status)).length,
+        completedCount: clientDocuments.filter((document) => document.status === 'approved').length,
+        requestCount: clientDocuments.filter((document) => document.clientRequest && !document.clientRequest.resolvedAt).length,
+      };
+    })
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const pendingTotal = clients.reduce((total, client) => total + client.pendingCount, 0);
+  const attentionTotal = clients.reduce((total, client) => total + client.attentionCount, 0);
+  const completedTotal = clients.reduce((total, client) => total + client.completedCount, 0);
+  const filteredClients = clients.filter((client) => {
+    const matchesQuery = `${client.name} ${client.email} ${client.country ?? ''}`.toLowerCase().includes(query.trim().toLowerCase());
+    const matchesStatus = statusFilter === 'all'
+      || (statusFilter === 'pending' && client.pendingCount > 0)
+      || (statusFilter === 'attention' && client.attentionCount > 0)
+      || (statusFilter === 'completed' && client.completedCount > 0);
+    return matchesQuery && matchesStatus;
+  });
 
-  return <div className="mx-auto max-w-6xl space-y-6">
-    <div><p className="text-xs font-semibold uppercase tracking-[.14em] text-cyan">FinTax Consulting · Admin demo</p><h2 className="mt-1 text-2xl font-semibold tracking-tight">Clients</h2><p className="mt-2 text-sm text-muted">Fictional demo client summaries and document activity for this browser session.</p></div>
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-      {[['Demo clients', demoClients.length, 'bg-blue-50 text-blue-700'], ['Waiting for review', pendingTotal, 'bg-amber-50 text-amber-700'], ['Needs attention', attentionTotal, 'bg-rose-50 text-rose-700']].map(([label, value, color]) => <Panel key={label} className="!rounded-2xl !border-white/80 !bg-white/85 p-3 shadow-[0_16px_40px_-30px_rgba(60,80,140,.4)] sm:p-4"><p className="text-[10px] text-muted sm:text-xs">{label}</p><p className={`mt-1 text-xl font-semibold ${color}`}>{value}</p></Panel>)}
+  return <div className="mx-auto max-w-6xl space-y-4 sm:space-y-5">
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <p className="text-xs text-muted">Client records and document activity for this browser demo.</p>
+      {onManageAccounts && <Button variant="outline" className="min-h-10" onClick={onManageAccounts}>Manage accounts <ArrowRight className="ms-2 size-4" /></Button>}
+    </div>
+    <div className="grid grid-cols-3 gap-2 sm:gap-3">
+      {[['Client accounts', clients.length, 'text-blue-700'], ['Waiting for review', pendingTotal, 'text-amber-700'], ['Needs attention', attentionTotal, 'text-rose-700']].map(([label, value, color]) => <Panel key={label} className="!rounded-2xl !border-white/80 !bg-white/85 p-2.5 shadow-[0_16px_40px_-30px_rgba(60,80,140,.4)] sm:p-4"><p className="line-clamp-2 min-h-8 text-[10px] leading-4 text-muted sm:min-h-0 sm:text-xs">{label}</p><p className={`mt-0.5 text-xl font-semibold sm:mt-1 ${color}`}>{value}</p></Panel>)}
     </div>
     <Panel className="overflow-hidden !rounded-3xl !border-white/80 !bg-white/90 shadow-[0_24px_60px_-34px_rgba(60,80,140,.35)]">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b hairline px-4 py-4 sm:px-5"><div><h3 className="font-semibold">Client workspaces</h3><p className="mt-1 text-xs text-muted">{demoClients.length} fictional clients · {completedTotal} approved documents</p></div><Badge tone="neutral">Demo data only</Badge></div>
-      <ul className="space-y-2 p-3 sm:p-4">{demoClients.map((client) => {
-        const clientDocuments = documents.filter((document) => document.clientId === client.email);
-        const pendingCount = clientDocuments.filter((document) => ['processing', 'review'].includes(document.status)).length;
-        const attentionCount = clientDocuments.filter((document) => ['needs_information', 'action_required', 'password_required', 'rejected'].includes(document.status)).length;
-        const completedCount = clientDocuments.filter((document) => document.status === 'approved').length;
-        const requestCount = clientDocuments.filter((document) => document.clientRequest && !document.clientRequest.resolvedAt).length;
-        return <li key={client.id} className={`rounded-2xl border p-3 transition-colors sm:p-4 ${selectedClientId === client.id ? 'border-blue-200 bg-blue-50/40' : 'border-slate-200/80 bg-white hover:bg-slate-50/70'}`}>
-          <button type="button" aria-expanded={selectedClientId === client.id} onClick={() => setSelectedClientId((current) => current === client.id ? null : client.id)} className="flex w-full flex-wrap items-center gap-3 text-left">
-            <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-blue-50 text-blue-700"><Users className="size-5" /></span>
-            <span className="min-w-40 flex-1"><span className="block text-sm font-semibold">{client.company}</span><span className="block truncate text-xs text-muted">{client.email} · {client.country} · DEMO DATA</span></span>
-            <span className="flex max-w-full flex-wrap justify-start gap-1.5 sm:justify-end">
+      <div className="border-b hairline px-3 py-3 sm:px-5 sm:py-4">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0"><h2 className="font-semibold">Client workspaces</h2><p className="mt-1 truncate text-xs text-muted">{clients.length} client accounts · {completedTotal} completed documents</p></div>
+          <Badge className="shrink-0" tone="neutral">Browser demo</Badge>
+        </div>
+        <div className="mt-3 flex min-w-0 items-center gap-2">
+          <label className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted" />
+            <Input aria-label="Search clients" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search clients" className="h-11 ps-9 text-sm" />
+          </label>
+          <label className="sr-only" htmlFor="client-status-filter">Filter clients by document status</label>
+          <select id="client-status-filter" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)} className="h-11 w-[min(42%,11rem)] shrink-0 rounded-xl border hairline bg-white px-2 text-xs sm:w-auto sm:px-3">
+            <option value="all">All clients</option><option value="pending">Waiting review</option><option value="attention">Needs attention</option><option value="completed">Completed</option>
+          </select>
+        </div>
+      </div>
+      <ul className="space-y-2 p-2.5 sm:p-4">{filteredClients.map((client) => {
+        const clientDocuments = client.documents;
+        const pendingCount = client.pendingCount;
+        const attentionCount = client.attentionCount;
+        const completedCount = client.completedCount;
+        const requestCount = client.requestCount;
+        return <li key={client.id} className={`min-w-0 rounded-2xl border p-2.5 transition-colors sm:p-4 ${selectedClientId === client.id ? 'border-blue-200 bg-blue-50/40' : 'border-slate-200/80 bg-white hover:bg-slate-50/70'}`}>
+          <button type="button" aria-expanded={selectedClientId === client.id} aria-label={`${client.name}, ${clientDocuments.length} documents, ${pendingCount} pending, ${attentionCount} attention, ${completedCount} completed, ${requestCount} outstanding requests. ${selectedClientId === client.id ? 'Hide' : 'Show'} document history`} onClick={() => setSelectedClientId((current) => current === client.id ? null : client.id)} className="w-full text-left">
+            <span className="flex min-w-0 items-center gap-2.5">
+              <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-blue-50 text-blue-700 sm:size-10"><Users className="size-5" /></span>
+              <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{client.name}</span><span className="block truncate text-xs text-muted">{client.email} · {client.demo ? 'Sample client' : 'Managed'}</span></span>
+              <ArrowRight className={`size-4 shrink-0 text-muted transition-transform ${selectedClientId === client.id ? 'rotate-90' : ''}`} aria-hidden />
+            </span>
+            <span className="mt-2 grid grid-cols-5 gap-1 border-t border-slate-100 pt-2 sm:hidden">
+              {[[clientDocuments.length, 'Docs'], [pendingCount, 'Review'], [attentionCount, 'Attention'], [completedCount, 'Done'], [requestCount, 'Requests']].map(([count, label]) => <span key={label} className="min-w-0 text-center">
+                <span className={`block text-xs font-semibold tabular-nums ${label === 'Attention' && attentionCount ? 'text-amber-700' : label === 'Review' && pendingCount ? 'text-cyan' : 'text-slate-700'}`}>{count}</span>
+                <span className="block truncate text-[9px] leading-3 text-slate-500">{label}</span>
+              </span>)}
+            </span>
+            <span className="hidden max-w-full flex-wrap justify-start gap-1.5 sm:flex sm:justify-end">
               <Badge tone="neutral">{clientDocuments.length} documents</Badge>
               <Badge tone="cyan">{pendingCount} pending</Badge>
               <Badge tone={attentionCount ? 'warn' : 'neutral'}>{attentionCount} attention</Badge>
@@ -257,13 +343,14 @@ function DemoClientsPage() {
                 <span className="min-w-0"><span className="block truncate font-medium">{document.name}</span><span className="mt-1 block text-muted">{document.category.replace(/_/g, ' ')} · {new Date(document.createdAt).toLocaleString()}</span>
                   {document.clientRequest && <span className="mt-1 block text-amber-700">{document.clientRequest.reason} · {document.clientRequest.resolvedAt ? 'Client responded' : 'Outstanding'}</span>}
                 </span>
-                <Badge tone={document.status === 'approved' ? 'ok' : ['rejected', 'needs_information'].includes(document.status) ? 'warn' : 'cyan'}>{document.status.replace(/_/g, ' ')}</Badge>
+                <span className="flex items-center gap-2"><Badge tone={document.status === 'approved' ? 'ok' : ['rejected', 'needs_information'].includes(document.status) ? 'warn' : 'cyan'}>{document.status.replace(/_/g, ' ')}</Badge>{onOpenDocument && <Button variant="outline" className="min-h-8 px-2 text-[11px]" onClick={() => onOpenDocument(document)}>Open</Button>}</span>
               </li>)}</ul>
               : <p className="mt-2 text-xs text-muted">No demo documents yet. Client records stay isolated by demo account email.</p>}
           </div>}
         </li>;
-      })}</ul>
-      <p className="border-t hairline px-4 py-3 text-[11px] text-muted sm:px-5">Demo records exist only in this tab. Account creation and staff assignment are not simulated here; they remain in the existing account-management feature.</p>
+      })}{!filteredClients.length && <li className="px-4 py-10 text-center text-sm text-muted">No clients match these filters.</li>}</ul>
+      <p className="hidden border-t hairline px-4 py-3 text-[11px] text-muted sm:block sm:px-5">Client data stays in this browser demo. Create and manage accounts from Manage accounts; review each client’s documents from their workspace.</p>
+      <details className="border-t hairline px-3 py-1 sm:hidden"><summary className="flex min-h-11 cursor-pointer items-center text-xs font-medium text-muted">About client records</summary><p className="pb-3 text-xs leading-5 text-muted">Client data stays in this browser demo. Create and manage accounts from Manage accounts; review each client’s documents from their workspace.</p></details>
     </Panel>
   </div>;
 }

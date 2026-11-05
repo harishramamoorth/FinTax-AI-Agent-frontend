@@ -15,16 +15,25 @@ export function demoClientById(clientId: string): Client | undefined {
   };
 }
 
+export function demoClientIdentityById(clientId?: string): { name: string; email: string } | undefined {
+  if (!clientId) return undefined;
+  const account = DEMO_CLIENTS.find((client) => client.email === clientId || client.id === clientId);
+  return account ? { name: account.name, email: account.email } : undefined;
+}
+
 export function documentsVisibleTo(
   documents: DemoDocument[],
   role: 'client' | 'staff' | 'admin',
   actorId: string,
+  actorName = actorId,
 ): DemoDocument[] {
   return documents.filter((document) => {
-    if (role !== 'client' && document.clientSaved === false) return false;
     if (!document.clientId) return role !== 'client';
+    if (role === 'admin') return true;
+    if (role === 'staff' && document.clientSaved === false && !document.assignedStaffId) return false;
+    if (role === 'staff' && document.assignedStaffId) return document.assignedStaffId === actorId || document.assignedStaffId === actorName;
     const client = demoClientById(document.clientId);
-    return client ? canAccessClientData(role, actorId, client) : role === 'admin';
+    return client ? canAccessClientData(role, actorName, client) : false;
   });
 }
 

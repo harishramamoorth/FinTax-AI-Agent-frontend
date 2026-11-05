@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import {
-  Banknote, Building2, ChevronRight, ClipboardCheck, FileText, LayoutDashboard,
+  Banknote, Building2, ChevronRight, ClipboardCheck, FileText, FileUp, LayoutDashboard,
   LogOut, Plus, X, type LucideIcon,
 } from 'lucide-react';
 import type { DemoDocument } from './demoWorkflow';
@@ -19,6 +19,8 @@ export const PALETTE = [
   ['#3b82f6', '#06b6d4'],
   ['#d97706', '#db2777'],
   ['#059669', '#06b6d4'],
+  ['#0891b2', '#2563eb'],
+  ['#db2777', '#9333ea'],
 ] as const;
 
 export function CountUp({ value }: { value: number }) {
@@ -64,6 +66,9 @@ export function NavDrawer<Id extends string>({
   onSignOut: () => void;
 }) {
   const reduce = useReducedMotion();
+  const [moreOpen, setMoreOpen] = useState(false);
+  const primaryItems = items.filter((item) => item.group === 'workspace');
+  const additionalItems = items.filter((item) => item.group !== 'workspace');
 
   useEffect(() => {
     if (!open) return;
@@ -108,7 +113,7 @@ export function NavDrawer<Id extends string>({
             </button>
           </div>
           <nav className="mt-3 flex-1 space-y-1 overflow-y-auto" aria-label="Workspace">
-            {items.map((item, index) => (
+            {primaryItems.map((item, index) => (
               <motion.button
                 key={item.id}
                 type="button"
@@ -124,6 +129,29 @@ export function NavDrawer<Id extends string>({
                 {counts[item.id] ? <span className="rounded-full bg-warn/15 px-2 text-[11px] text-warn">{counts[item.id]}</span> : null}
               </motion.button>
             ))}
+            {additionalItems.length > 0 && <details open={moreOpen || additionalItems.some((item) => item.id === screen)} onToggle={(event) => setMoreOpen(event.currentTarget.open)} className="mt-3 border-t hairline pt-2">
+              <summary className="flex min-h-11 cursor-pointer list-none items-center gap-3 rounded-xl px-3 text-sm text-muted hover:bg-ink/5 [&::-webkit-details-marker]:hidden">
+                <Plus className="size-4 shrink-0" /><span className="flex-1">More workspace tools</span>
+              </summary>
+              <div className="mt-1 space-y-1">
+                {additionalItems.map((item, index) => (
+                  <motion.button
+                    key={item.id}
+                    type="button"
+                    onClick={() => onSelect(item.id)}
+                    aria-current={screen === item.id ? 'page' : undefined}
+                    initial={reduce ? false : { opacity: 0, x: -12 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.04 * (primaryItems.length + index) }}
+                    className={`flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-start text-sm ${screen === item.id ? 'bg-cyan/10 text-ink ring-1 ring-cyan/20' : 'text-muted hover:bg-ink/5 hover:text-ink'}`}
+                  >
+                    <item.icon className={`size-4 shrink-0 ${screen === item.id ? 'text-cyan' : ''}`} />
+                    <span className="flex-1 truncate">{item.label}</span>
+                    {counts[item.id] ? <span className="rounded-full bg-warn/15 px-2 text-[11px] text-warn">{counts[item.id]}</span> : null}
+                  </motion.button>
+                ))}
+              </div>
+            </details>}
           </nav>
           <button type="button" onClick={onSignOut} className="mt-3 flex min-h-11 items-center justify-center gap-2 rounded-xl border hairline text-sm text-muted hover:text-ink">
             <LogOut className="size-4" />Logout
@@ -134,7 +162,7 @@ export function NavDrawer<Id extends string>({
   );
 }
 
-const PRIMARY_TABS = [
+const STAFF_PRIMARY_TABS = [
   ['overview', 'Overview', LayoutDashboard],
   ['documents', 'Documents', FileText],
   ['review', 'Review', ClipboardCheck],
@@ -142,17 +170,27 @@ const PRIMARY_TABS = [
 ] as const;
 
 export function BottomBar({
-  screen, onSelect, reviewCount, onMore,
+  screen, role, onSelect, reviewCount, onMore,
 }: {
   screen: string;
-  onSelect: (id: 'overview' | 'documents' | 'review' | 'banking') => void;
+  role: 'admin' | 'staff';
+  onSelect: (id: 'overview' | 'documents' | 'uploads' | 'review' | 'banking' | 'clients') => void;
   reviewCount: number;
   onMore: () => void;
 }) {
+  const primaryTabs = role === 'admin'
+    ? [
+        ['overview', 'Overview', LayoutDashboard],
+        ['uploads', 'Uploads', FileUp],
+        ['review', 'Review', ClipboardCheck],
+        ['clients', 'Clients', Building2],
+      ] as const
+    : STAFF_PRIMARY_TABS;
+
   return (
     <nav aria-label="Primary workspace navigation" className="workspace-bottom-nav fixed inset-x-0 bottom-0 z-30 px-3 pb-[calc(env(safe-area-inset-bottom)+10px)] pt-2 lg:hidden">
       <ul className="workspace-bottom-dock mx-auto grid max-w-xl grid-cols-5">
-        {PRIMARY_TABS.flatMap(([id, label, Icon], index) => {
+        {primaryTabs.flatMap(([id, label, Icon], index) => {
           const active = screen === id;
           const tab = (
             <li key={id}>

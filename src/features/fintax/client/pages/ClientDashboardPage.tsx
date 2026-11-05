@@ -461,7 +461,7 @@ export default function ClientDashboardPage({
                               Upload for this request
                             </Button>
                           </>
-                        ) : (
+                        ) : requestPendingReview ? (
                           <div className="flex items-center gap-2">
                             <span className="inline-flex items-center gap-1 text-xs text-amber-600 bg-amber-500/10 px-2.5 py-1 rounded-full font-medium">
                               <Clock className="size-3" /> Pending staff confirmation
@@ -470,6 +470,10 @@ export default function ClientDashboardPage({
                               Upload another version
                             </Button>
                           </div>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-xs text-emerald-700 bg-emerald-500/10 px-2.5 py-1 rounded-full font-medium">
+                            <CheckCircle2 className="size-3" /> Advisor reviewed your response
+                          </span>
                         )}
                         {selectedTaskId && (() => {
                           const selectedTask = activeClient.tasks.find((task) => task.id === selectedTaskId);

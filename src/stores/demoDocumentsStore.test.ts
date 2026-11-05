@@ -70,8 +70,109 @@ describe('shared demo document store', () => {
     expect(document.clientRequest?.response).toBe('Replacement uploaded.');
     expect(document.clientRequest?.resolvedAt).toBeTruthy();
     expect(document.clientRequest?.status).toBe('pending_review');
+    expect(document.status).toBe('review');
+    expect(document.workflowStage).toBe('staff_review');
+    expect(document.updatedAt).toBeTruthy();
     expect(document.reviewHistory?.map((event) => event.action)).toEqual(['Information requested', 'Client response']);
     expect(useDemoDocumentsStore.getState().followUpTasks[0].status).toBe('completed');
+  });
+
+  it('lets a client replacement return a period-linked clarification to staff review', () => {
+    const period = createMonthlyPeriod('client@fintax.demo', 2026, 10);
+    useDemoDocumentsStore.setState({
+      documents: [{
+        ...makeDocument(),
+        id: 'CLIENT-REPLACEMENT',
+        clientId: period.clientId,
+        periodId: period.id,
+        status: 'needs_information',
+        clientRequest: { reason: 'Please upload a clearer copy.', createdAt: '2026-10-23T01:00:00.000Z' },
+      }],
+      periods: [period],
+    });
+
+    useDemoDocumentsStore.getState().recordReview('CLIENT-REPLACEMENT', 'Replacement uploaded', 'Client uploaded a clearer invoice.', {
+      clientRequest: {
+        reason: 'Please upload a clearer copy.',
+        createdAt: '2026-10-23T01:00:00.000Z',
+        response: 'Replacement uploaded: invoice-new.pdf',
+        resolvedAt: new Date().toISOString(),
+        status: 'pending_review',
+      },
+    }, period.clientId);
+
+    expect(useDemoDocumentsStore.getState().documents[0]).toMatchObject({
+      status: 'review',
+      workflowStage: 'staff_review',
+      clientRequest: { status: 'pending_review', response: 'Replacement uploaded: invoice-new.pdf' },
+    });
+  });
+
+  it('marks a client request resolved after its response is approved', () => {
+    useDemoDocumentsStore.setState({
+      documents: [{
+        ...makeDocument(),
+        status: 'review',
+        clientRequest: { reason: 'Please confirm this amount.', createdAt: '2026-10-23T01:00:00.000Z', response: 'Confirmed.', status: 'pending_review' },
+      }],
+    });
+    useDemoDocumentsStore.getState().recordReview('CLIENT-TEST01', 'Approved', 'Response approved.', { status: 'approved' });
+
+    expect(useDemoDocumentsStore.getState().documents[0].clientRequest?.status).toBe('resolved');
+  });
+
+  it('allows admins to manage period-linked documents while preserving staff assignment checks', () => {
+    const period = createMonthlyPeriod('client@fintax.demo', 2026, 10);
+    useDemoDocumentsStore.setState({
+      documents: [{ ...makeDocument(), id: 'CLIENT-PERIOD01', clientId: period.clientId, periodId: period.id }],
+      periods: [period],
+      roleAssignments: [
+        ...useDemoDocumentsStore.getState().roleAssignments,
+        { id: 'admin-alex', name: 'Alex Morgan', email: 'admin@fintax.demo', role: 'admin' },
+      ],
+    });
+
+    useDemoDocumentsStore.getState().updateDocument('CLIENT-PERIOD01', { assignedStaffId: 'staff-demo' }, 'Alex Morgan');
+    useDemoDocumentsStore.getState().recordReview('CLIENT-PERIOD01', 'Approved', 'Reviewed by admin.', {
+      status: 'approved',
+      workflowStage: 'completed',
+    }, 'Alex Morgan');
+
+    expect(useDemoDocumentsStore.getState().documents[0]).toMatchObject({
+      assignedStaffId: 'staff-demo',
+      status: 'approved',
+      workflowStage: 'completed',
+    });
+  });
+
+  it('lets the specifically assigned staff login edit and review a period document', () => {
+    const period = createMonthlyPeriod('client@fintax.demo', 2026, 10);
+    useDemoDocumentsStore.setState({
+      documents: [{
+        ...makeDocument(),
+        id: 'CLIENT-ASSIGNED01',
+        clientId: period.clientId,
+        periodId: period.id,
+        assignedStaffId: 'staff-taylor',
+      }],
+      periods: [period],
+      roleAssignments: [
+        ...useDemoDocumentsStore.getState().roleAssignments,
+        { id: 'staff-taylor', name: 'Taylor Staff', email: 'taylor@fintax.demo', role: 'staff' },
+      ],
+    });
+
+    useDemoDocumentsStore.getState().updateFields('CLIENT-ASSIGNED01', 'counterparty', 'Corrected supplier', 'staff-taylor');
+    useDemoDocumentsStore.getState().recordReview('CLIENT-ASSIGNED01', 'Approved', 'Reviewed by assigned staff.', {
+      status: 'approved',
+      workflowStage: 'completed',
+    }, 'staff-taylor');
+
+    expect(useDemoDocumentsStore.getState().documents[0]).toMatchObject({
+      fields: { counterparty: 'Corrected supplier' },
+      status: 'approved',
+      workflowStage: 'completed',
+    });
   });
 
   it('keeps client ownership attached to each record for per-client filtering', () => {
@@ -156,6 +257,41 @@ describe('shared demo document store', () => {
       'Demo role assignment changed',
       'Workspace setting changed',
     ]);
+  });
+
+  it('records document assignments in review and audit history', () => {
+    useDemoDocumentsStore.getState().addDocument(makeDocument());
+    useDemoDocumentsStore.getState().updateDocument('CLIENT-TEST01', { assignedStaffId: 'staff-demo' }, 'Alex Morgan');
+
+    const document = useDemoDocumentsStore.getState().documents[0];
+    expect(document.assignedStaffId).toBe('staff-demo');
+    expect(document.reviewHistory?.at(-1)).toMatchObject({
+      action: 'Document assignment changed',
+      details: 'Assigned to staff-demo.',
+    });
+    expect(useDemoDocumentsStore.getState().auditEvents[0]).toMatchObject({
+      action: 'Document assignment changed',
+      target: 'CLIENT-TEST01',
+    });
+    const historyLength = document.reviewHistory?.length ?? 0;
+    const auditLength = useDemoDocumentsStore.getState().auditEvents.length;
+    useDemoDocumentsStore.getState().updateDocument('CLIENT-TEST01', { confidence: 0.8 }, 'Lena M.');
+    expect(useDemoDocumentsStore.getState().documents[0].assignedStaffId).toBe('staff-demo');
+    expect(useDemoDocumentsStore.getState().documents[0].reviewHistory).toHaveLength(historyLength);
+    expect(useDemoDocumentsStore.getState().auditEvents).toHaveLength(auditLength);
+  });
+
+  it('manages session-only demo profiles without treating them as authenticated accounts', () => {
+    const store = useDemoDocumentsStore.getState();
+    expect(store.createDemoProfile({ name: 'Taylor Staff', email: 'taylor@example.demo', role: 'staff' }, 'Alex Morgan')).toBe(true);
+    const created = useDemoDocumentsStore.getState().roleAssignments.find((profile) => profile.email === 'taylor@example.demo');
+    expect(created).toMatchObject({ name: 'Taylor Staff', role: 'staff', active: true });
+    expect(created?.createdAt).toBeTruthy();
+    expect(useDemoDocumentsStore.getState().createDemoProfile({ name: 'Duplicate', email: 'TAYLOR@example.demo', role: 'client' }, 'Alex Morgan')).toBe(false);
+    expect(useDemoDocumentsStore.getState().updateDemoProfile(created!.id, { name: 'Taylor Edited', email: 'taylor@example.demo' }, 'Alex Morgan')).toBe(true);
+    expect(useDemoDocumentsStore.getState().toggleDemoProfile(created!.id, 'Alex Morgan')).toBe(true);
+    expect(useDemoDocumentsStore.getState().roleAssignments.find((profile) => profile.id === created!.id)?.active).toBe(false);
+    expect(useDemoDocumentsStore.getState().deleteDemoProfile(created!.id, 'Alex Morgan')).toBe(true);
   });
 
   it('gates month submission on required checklist completion and records the submitted state', () => {

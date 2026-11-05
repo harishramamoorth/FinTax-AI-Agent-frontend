@@ -68,6 +68,9 @@ export interface DemoRoleAssignment {
   name: string;
   email: string;
   role: 'admin' | 'staff' | 'client';
+  loginName?: string;
+  active?: boolean;
+  createdAt?: string;
 }
 
 interface DemoDocumentsState {
@@ -92,7 +95,7 @@ interface DemoDocumentsState {
   reviewMonth(periodId: string, actor: string, action: 'start_review' | 'request_changes' | 'approve', details: string, analysis?: MonthlyPeriod['analysis']): boolean;
   resolveMonthFinding(periodId: string, findingId: string, actor: string, details: string): void;
   hydrateStorage(): Promise<void>;
-  startStorageSync(): () => void;
+  startStorageSync(onClientUpload?: (document: DemoDocument) => void): () => void;
   updateDocument(id: string, update: Partial<DemoDocument>, actor?: string): void;
   updateFields(id: string, key: keyof DemoFields, value: string, actor?: string): void;
   recordReview(id: string, action: string, details: string, update: Partial<DemoDocument>, actor?: string): void;
@@ -107,6 +110,10 @@ interface DemoDocumentsState {
   transitionPayrollDraft(documentId: string, status: DemoPayrollDraft['status'], actor: string): boolean;
   setWorkspaceSetting(key: keyof DemoWorkspaceSettings, value: boolean, actor: string): void;
   setRoleAssignment(id: string, role: DemoRoleAssignment['role'], actor: string): void;
+  createDemoProfile(profile: Pick<DemoRoleAssignment, 'name' | 'email' | 'role'>, actor: string): boolean;
+  updateDemoProfile(id: string, profile: Pick<DemoRoleAssignment, 'name' | 'email'>, actor: string): boolean;
+  toggleDemoProfile(id: string, actor: string): boolean;
+  deleteDemoProfile(id: string, actor: string): boolean;
   recordExport(documentIds: string[], actor: string): void;
 }
 
@@ -114,6 +121,34 @@ const recordAudit = (state: DemoDocumentsState, action: string, target: string, 
   { id: `audit-${crypto.randomUUID()}`, at: new Date().toISOString(), actor, action, target, details },
   ...state.auditEvents,
 ].slice(0, 200);
+
+function roleForDemoActor(state: DemoDocumentsState, actor: string): DemoRoleAssignment['role'] | undefined {
+  return state.roleAssignments.find((assignment) =>
+    assignment.id === actor || assignment.name === actor || assignment.email === actor || assignment.loginName === actor,
+  )?.role;
+}
+
+function canReviewPeriodDocument(
+  state: DemoDocumentsState,
+  actor: string,
+  document: DemoDocument,
+  client: typeof DEMO_CLIENTS[number],
+): boolean {
+  const assignment = state.roleAssignments.find((item) =>
+    item.id === actor || item.name === actor || item.email === actor || item.loginName === actor,
+  );
+  if (assignment?.role === 'admin') return true;
+  if (assignment?.role !== 'staff') return false;
+  const identities = [assignment.id, assignment.name, assignment.email, assignment.loginName].filter((value): value is string => Boolean(value));
+  const assignedStaffIds = [document.assignedStaffId ?? 'Lena M.'];
+  return identities.some((identity) => canAccessClientData('staff', identity, {
+    id: client.email,
+    company: client.company,
+    country: client.country,
+    currency: client.currency,
+    assignedStaffIds,
+  }));
+}
 
 function periodAuditEntry(
   action: DemoAuditEntry['action'],
@@ -142,9 +177,9 @@ export const useDemoDocumentsStore = create<DemoDocumentsState>((set, get) => ({
   auditEvents: [],
   settings: { exportsEnabled: true, payrollApprovalsEnabled: true },
   roleAssignments: [
-    { id: 'admin-demo', name: 'Admin Demo User', email: 'admin@fintax.demo', role: 'admin' },
-    { id: 'staff-demo', name: 'Staff Demo User', email: 'staff@fintax.demo', role: 'staff' },
-    { id: 'client-demo', name: 'Client Demo User', email: 'client@fintax.demo', role: 'client' },
+    { id: 'admin-demo', name: 'Alex Morgan', email: 'admin@fintax.demo', role: 'admin', active: true, createdAt: '2026-10-01T00:00:00.000Z' },
+    { id: 'staff-demo', name: 'Lena M.', email: 'lena@fintax.demo', role: 'staff', loginName: 'Lena M.', active: true, createdAt: '2026-10-01T00:00:00.000Z' },
+    { id: 'client-demo', name: 'Muster GmbH', email: 'client@fintax.demo', role: 'client', active: true, createdAt: '2026-10-01T00:00:00.000Z' },
   ],
   exports: [],
   addDocument: (document, actor) => set((state) => {
@@ -316,13 +351,19 @@ export const useDemoDocumentsStore = create<DemoDocumentsState>((set, get) => ({
       set({ storageHydrated: true, storageError: message });
     }
   },
-  startStorageSync: () => createStorageChangeNotifier(() => {
+  startStorageSync: (onClientUpload) => createStorageChangeNotifier(() => {
     const previousSubmitted = new Set(get().periods.filter((period) => period.status === 'submitted').map((period) => period.id));
+    const previousDocumentIds = new Set(get().documents.map((document) => document.id));
     void get().hydrateStorage().then(() => {
       const newSubmission = get().periods.find((period) => period.status === 'submitted' && !previousSubmitted.has(period.id));
       if (newSubmission) {
         const periodLabel = new Date(newSubmission.year, newSubmission.month - 1, 1).toLocaleDateString('en', { month: 'long', year: 'numeric' });
         toast.success('New month submission received', `${newSubmission.clientId} · ${periodLabel} is ready for staff review.`, true);
+      }
+      if (onClientUpload) {
+        get().documents
+          .filter((document) => !previousDocumentIds.has(document.id) && !document.sample && Boolean(document.clientId))
+          .forEach(onClientUpload);
       }
     });
   }),
@@ -331,28 +372,40 @@ export const useDemoDocumentsStore = create<DemoDocumentsState>((set, get) => ({
     if (!current || (update.status && !canTransitionDocumentStatus(current.status, update.status))) return state;
     const period = current.periodId ? state.periods.find((item) => item.id === current.periodId) : undefined;
     const actorId = actor ?? current.clientId ?? 'Demo staff';
+    const actorRole = actor ? roleForDemoActor(state, actor) : undefined;
     const client = period && DEMO_CLIENTS.find((item) => item.email === period.clientId);
     const canClientEdit = period && actorId === period.clientId && (period.status === 'open' || period.status === 'changes_requested');
-    const canStaffEdit = period && client && canAccessClientData('staff', actorId, {
-      id: client.email,
-      company: client.company,
-      country: client.country,
-      currency: client.currency,
-      assignedStaffIds: ['Lena M.'],
-    });
+    const canStaffEdit = period && client && canReviewPeriodDocument(state, actorId, current, client);
     if (period && !canClientEdit && !canStaffEdit) return state;
     const statusChanged = Boolean(update.status && update.status !== current.status);
+    const assignmentChanged = Object.prototype.hasOwnProperty.call(update, 'assignedStaffId')
+      && update.assignedStaffId !== current.assignedStaffId;
     const nextStatus = update.status ?? current.status;
     const action = statusChanged ? `Status changed: ${current.status} → ${nextStatus}` : '';
+    const assignmentAction = assignmentChanged ? 'Document assignment changed' : '';
+    const historyEntry = statusChanged
+      ? { at: new Date().toISOString(), action, details: update.note ?? 'Workflow status updated.' }
+      : assignmentChanged
+        ? { at: new Date().toISOString(), action: assignmentAction, details: update.assignedStaffId ? `Assigned to ${update.assignedStaffId}.` : 'Assignment cleared.' }
+        : undefined;
     return {
       documents: state.documents.map((document) => document.id === id
         ? {
           ...document,
           ...update,
-          ...(statusChanged ? { reviewHistory: [...(document.reviewHistory ?? []), { at: new Date().toISOString(), action, details: update.note ?? 'Workflow status updated.' }] } : {}),
+          updatedAt: new Date().toISOString(),
+          ...(historyEntry ? { reviewHistory: [...(document.reviewHistory ?? []), historyEntry] } : {}),
         }
         : document),
-      ...(statusChanged ? { auditEvents: recordAudit(state, action, id, update.note ?? 'Workflow status updated.', actor ?? current.clientId ?? 'Demo staff') } : {}),
+      ...(statusChanged || assignmentChanged ? {
+        auditEvents: recordAudit(
+          state,
+          statusChanged ? action : assignmentAction,
+          id,
+          statusChanged ? update.note ?? 'Workflow status updated.' : update.assignedStaffId ? `Assigned to ${update.assignedStaffId}.` : 'Assignment cleared.',
+          actor ?? current.clientId ?? 'Demo staff',
+        ),
+      } : {}),
       ...(statusChanged && current.periodId ? {
         periodAudit: [
           periodAuditEntry(
@@ -360,7 +413,7 @@ export const useDemoDocumentsStore = create<DemoDocumentsState>((set, get) => ({
             id,
             update.note ?? action,
             actor ?? current.clientId ?? 'Demo staff',
-            actor === current.clientId ? 'client' : 'staff',
+            actor === current.clientId ? 'client' : actorRole === 'admin' ? 'admin' : 'staff',
           ),
           ...state.periodAudit,
         ],
@@ -373,13 +426,8 @@ export const useDemoDocumentsStore = create<DemoDocumentsState>((set, get) => ({
     const period = current.periodId ? state.periods.find((item) => item.id === current.periodId) : undefined;
     const client = period && DEMO_CLIENTS.find((item) => item.email === period.clientId);
     const canClientEdit = period && actor === period.clientId && (period.status === 'open' || period.status === 'changes_requested');
-    const canStaffEdit = period && client && canAccessClientData('staff', actor, {
-      id: client.email,
-      company: client.company,
-      country: client.country,
-      currency: client.currency,
-      assignedStaffIds: ['Lena M.'],
-    });
+    const actorRole = roleForDemoActor(state, actor);
+    const canStaffEdit = period && client && canReviewPeriodDocument(state, actor, current, client);
     if (period && !canClientEdit && !canStaffEdit) return state;
     const details = `${key} updated during review. No model training occurs in this demo.`;
     return {
@@ -387,6 +435,7 @@ export const useDemoDocumentsStore = create<DemoDocumentsState>((set, get) => ({
         ? {
           ...document,
           fields: { ...document.fields, [key]: value },
+          updatedAt: new Date().toISOString(),
           reviewHistory: [...(document.reviewHistory ?? []), {
             at: new Date().toISOString(),
             action: 'Field corrected',
@@ -408,33 +457,39 @@ export const useDemoDocumentsStore = create<DemoDocumentsState>((set, get) => ({
     if (!current || (update.status && !canTransitionDocumentStatus(current.status, update.status))) return state;
     const period = current.periodId ? state.periods.find((item) => item.id === current.periodId) : undefined;
     const client = period && DEMO_CLIENTS.find((item) => item.email === period.clientId);
-    const staffCanReview = period && client && canAccessClientData('staff', actor, {
-      id: client.email,
-      company: client.company,
-      country: client.country,
-      currency: client.currency,
-      assignedStaffIds: ['Lena M.'],
-    });
-    if (period && !staffCanReview) return state;
+    const actorRole = roleForDemoActor(state, actor);
+    const staffCanReview = period && client && canReviewPeriodDocument(state, actor, current, client);
+    const clientResponded = period
+      && actor === period.clientId
+      && Boolean(current.clientRequest)
+      && Boolean(update.clientRequest?.response)
+      && canTransitionDocumentStatus(current.status, 'review');
+    if (period && !staffCanReview && !clientResponded) return state;
     return {
       documents: state.documents.map((document) => document.id === id
         ? {
           ...document,
           ...update,
+          ...(clientResponded ? { status: 'review' as const, workflowStage: 'staff_review' as const } : {}),
+          ...(update.status === 'approved' && (update.clientRequest ?? document.clientRequest)?.response
+            ? { clientRequest: { ...(update.clientRequest ?? document.clientRequest)!, status: 'resolved' as const } }
+            : {}),
+          updatedAt: new Date().toISOString(),
           reviewHistory: [...(document.reviewHistory ?? []), { at: new Date().toISOString(), action, details }],
         }
         : document),
       auditEvents: recordAudit(state, action, id, details, actor),
       ...(current.periodId && action.toLowerCase().includes('request') ? {
-        periodAudit: [periodAuditEntry('changes_requested', id, details, actor, 'staff'), ...state.periodAudit],
+        periodAudit: [periodAuditEntry('changes_requested', id, details, actor, actorRole === 'admin' ? 'admin' : 'staff'), ...state.periodAudit],
       } : {}),
     };
   }),
   respondToRequest: (id, response) => set((state) => {
     const document = state.documents.find((item) => item.id === id);
-    if (!document?.clientRequest) return state;
+    if (!document?.clientRequest || !canTransitionDocumentStatus(document.status, 'review')) return state;
+    const at = new Date().toISOString();
     const completedTasks = state.followUpTasks.filter((task) => task.documentId === id && task.status === 'open');
-    const auditState = { ...state, auditEvents: recordAudit(state, 'Client response received', id, response, 'Demo client') };
+    const auditState = { ...state, auditEvents: recordAudit(state, 'Client response received', id, response, document.clientId ?? 'Demo client') };
     const auditEvents = completedTasks.reduce(
       (current, task) => recordAudit({ ...state, auditEvents: current }, 'Follow-up task completed', task.id, task.title, 'Demo client'),
       auditState.auditEvents,
@@ -443,9 +498,13 @@ export const useDemoDocumentsStore = create<DemoDocumentsState>((set, get) => ({
       documents: state.documents.map((document) => document.id === id && document.clientRequest
       ? {
         ...document,
-        clientRequest: { ...document.clientRequest, response, resolvedAt: new Date().toISOString(), status: 'pending_review' },
+        status: 'review',
+        workflowStage: 'staff_review',
+        updatedAt: at,
+        note: 'Client response received. Review the response and document before approval.',
+        clientRequest: { ...document.clientRequest, response, resolvedAt: at, status: 'pending_review' },
         reviewHistory: [...(document.reviewHistory ?? []), {
-          at: new Date().toISOString(),
+          at,
           action: 'Client response',
           details: response,
         }],
@@ -534,6 +593,69 @@ export const useDemoDocumentsStore = create<DemoDocumentsState>((set, get) => ({
       auditEvents: recordAudit(state, 'Demo role assignment changed', id, `${assignment.role} changed to ${role}.`, actor),
     };
   }),
+  createDemoProfile: (profile, actor) => {
+    let created = false;
+    set((state) => {
+      if (state.roleAssignments.some((item) => item.email.toLowerCase() === profile.email.toLowerCase())) return state;
+      created = true;
+      const newProfile: DemoRoleAssignment = {
+        ...profile,
+        id: `demo-profile-${crypto.randomUUID()}`,
+        active: true,
+        createdAt: new Date().toISOString(),
+      };
+      return {
+        roleAssignments: [...state.roleAssignments, newProfile],
+        auditEvents: recordAudit(state, 'Demo profile created', newProfile.email, `${newProfile.role} directory profile created.`, actor),
+      };
+    });
+    return created;
+  },
+  updateDemoProfile: (id, profile, actor) => {
+    let updated = false;
+    set((state) => {
+      const current = state.roleAssignments.find((item) => item.id === id);
+      if (!current || current.role === 'admin'
+        || (current.role === 'client' && current.email !== profile.email
+          && state.documents.some((document) => document.clientId === current.email))
+        || state.roleAssignments.some((item) => item.id !== id && item.email.toLowerCase() === profile.email.toLowerCase())) return state;
+      updated = true;
+      return {
+        roleAssignments: state.roleAssignments.map((item) => item.id === id ? { ...item, ...profile } : item),
+        auditEvents: recordAudit(state, 'Demo profile updated', current.email, `Name or email updated by ${actor}.`, actor),
+      };
+    });
+    return updated;
+  },
+  toggleDemoProfile: (id, actor) => {
+    let toggled = false;
+    set((state) => {
+      const current = state.roleAssignments.find((item) => item.id === id);
+      if (!current || current.role === 'admin') return state;
+      toggled = true;
+      const active = current.active === false;
+      return {
+        roleAssignments: state.roleAssignments.map((item) => item.id === id ? { ...item, active } : item),
+        auditEvents: recordAudit(state, active ? 'Demo profile activated' : 'Demo profile deactivated', current.email, 'Directory status changed; this does not change sign-in access.', actor),
+      };
+    });
+    return toggled;
+  },
+  deleteDemoProfile: (id, actor) => {
+    let deleted = false;
+    set((state) => {
+      const current = state.roleAssignments.find((item) => item.id === id);
+      if (!current || current.role === 'admin'
+        || (current.role === 'staff' && state.documents.some((document) => document.assignedStaffId === current.name || document.assignedStaffId === current.id))
+        || (current.role === 'client' && state.documents.some((document) => document.clientId === current.email))) return state;
+      deleted = true;
+      return {
+        roleAssignments: state.roleAssignments.filter((item) => item.id !== id),
+        auditEvents: recordAudit(state, 'Demo profile deleted', current.email, 'Directory profile removed; this does not delete or disable an authenticated account.', actor),
+      };
+    });
+    return deleted;
+  },
   recordExport: (documentIds, actor) => set((state) => ({
     exports: [{ id: `export-${crypto.randomUUID()}`, at: new Date().toISOString(), actor, documentIds }, ...state.exports],
     auditEvents: recordAudit(state, 'CSV export downloaded', 'accounting-export', `${documentIds.length} records included.`, actor),

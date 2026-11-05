@@ -49,6 +49,8 @@ export interface DemoDocument {
   sample: boolean;
   clientSaved?: boolean;
   clientId?: string;
+  assignedStaffId?: string;
+  updatedAt?: string;
   paymentStatus?: 'paid' | 'unpaid' | 'unknown';
   currency?: string;
   replacementFor?: string;
@@ -59,7 +61,7 @@ export interface DemoDocument {
   validationWarnings?: string[];
   extractedDetails?: Record<string, string>;
   reviewHistory?: { at: string; action: string; details: string }[];
-  clientRequest?: { reason: string; createdAt: string; response?: string; resolvedAt?: string; status?: 'pending_review' };
+  clientRequest?: { reason: string; createdAt: string; response?: string; resolvedAt?: string; status?: 'pending_review' | 'resolved' };
   note?: string;
   clientNote?: string;
   file?: File;
