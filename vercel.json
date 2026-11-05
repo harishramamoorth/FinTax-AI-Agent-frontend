@@ -1,6 +1,13 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
+    { "source": "/login", "destination": "/index.html" },
+    { "source": "/admin", "destination": "/index.html" },
+    { "source": "/admin/:path*", "destination": "/index.html" },
+    { "source": "/staff", "destination": "/index.html" },
+    { "source": "/staff/:path*", "destination": "/index.html" },
+    { "source": "/client", "destination": "/index.html" },
+    { "source": "/client/:path*", "destination": "/index.html" },
     { "source": "/demo", "destination": "/index.html" },
     { "source": "/demo/:path*", "destination": "/index.html" },
     { "source": "/portal", "destination": "/index.html" },
