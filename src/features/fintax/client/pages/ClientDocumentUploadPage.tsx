@@ -2,7 +2,6 @@ import { useEffect, useState, type DragEvent, type MutableRefObject, type RefObj
 import { motion, useReducedMotion } from 'framer-motion';
 import {
   AlertTriangle,
-  CalendarClock,
   Check,
   CheckCircle2,
   Camera,
@@ -366,14 +365,19 @@ export default function ClientDocumentUploadPage({
     onCategoryChange(cat);
   };
   const typeLabel = (item: UploadType) => t3(lang, ...item.label);
-  const selectedType = AREA_CHECKBOXES[activeArea].find((item) => item.id === selectedTypeId) ?? AREA_CHECKBOXES[activeArea][0];
 
   const uploadDisabled = !storageReady || periodReadOnly;
   const areaTitle = (area: ClientArea) => ({
-    formation: t3(lang, 'Company documents', 'Unternehmensunterlagen', 'مستندات الشركة'),
+    formation: t3(lang, 'Formation', 'Gründung', 'تأسيس'),
     payroll: t3(lang, 'Payroll', 'Lohnabrechnung', 'الرواتب'),
     accounting: t3(lang, 'Accounting', 'Buchhaltung', 'المحاسبة'),
     correspondence: t3(lang, 'Correspondence', 'Korrespondenz', 'المراسلات'),
+  })[area];
+  const areaDescription = (area: ClientArea) => ({
+    formation: t3(lang, 'One-time company documents', 'Einmalige Unternehmensunterlagen', 'مستندات الشركة لمرة واحدة'),
+    payroll: t3(lang, 'Payroll, sick notes and staff changes', 'Lohnunterlagen, Krankmeldungen und Personaländerungen', 'الرواتب والإجازات المرضية وتغييرات الموظفين'),
+    accounting: t3(lang, 'Statements, invoices and receipts', 'Kontoauszüge, Rechnungen und Belege', 'كشوف الحسابات والفواتير والإيصالات'),
+    correspondence: t3(lang, 'Letters, contracts and other documents', 'Briefe, Verträge und sonstige Unterlagen', 'الخطابات والعقود والمستندات الأخرى'),
   })[area];
 
   const scrollToReview = (id: string) => {
@@ -416,32 +420,37 @@ export default function ClientDocumentUploadPage({
         : !storageReady && <p role="status" className="rounded-xl border border-warn/20 bg-warn/5 p-3 text-sm text-muted">Preparing browser storage. Controls will be available when ready.</p>}
 
       <section className="space-y-4">
-        <details className="group">
-          <summary className="flex min-h-9 cursor-pointer list-none flex-wrap items-center gap-2 text-sm font-medium text-[#1F2A44] [&::-webkit-details-marker]:hidden">
-            <span className="min-w-0 flex-1 truncate">{areaTitle(activeArea)}</span>
-            <span className="rounded-full bg-[#B07A2A]/10 px-3 py-1 text-xs font-semibold text-[#8A5E1F]">{t3(lang, 'Change', 'Ändern', 'تغيير')}</span>
-          </summary>
-          <div className="mt-2 border-t border-[#E6E0D0] pt-3">
-            <div role="group" aria-label={t3(lang, 'Choose an upload area', 'Upload-Bereich auswählen', 'اختر قسم الرفع')} className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {AREAS.map(({ key }) => (
-                <button key={key} type="button" aria-pressed={activeArea === key} onClick={() => switchArea(key)}
-                  className={cx('min-h-11 rounded-xl border px-3 text-start text-sm font-medium transition', activeArea === key ? 'border-[#B07A2A] bg-[#B07A2A]/10 text-[#1F2A44]' : 'border-[#E6E0D0] bg-white text-[#4A5468] hover:border-[#B07A2A]')}>
+        <fieldset className="rounded-xl border border-[#E6E0D0] bg-white p-3">
+          <legend className="px-1 text-xs font-semibold uppercase tracking-[.12em] text-[#4A5468]">
+            {t3(lang, 'Choose a document area', 'Dokumentenbereich auswählen', 'اختر قسم المستندات')}
+          </legend>
+          <div role="group" aria-label={t3(lang, 'Choose an upload area', 'Upload-Bereich auswählen', 'اختر قسم الرفع')} className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {AREAS.map(({ key, icon: AreaIcon }) => (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={activeArea === key}
+                onClick={() => switchArea(key)}
+                className={cx(
+                  'flex min-h-[76px] min-w-0 flex-col items-start justify-center gap-1 rounded-xl border px-3 py-2 text-start transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0B7F99]',
+                  activeArea === key
+                    ? 'border-[#B07A2A] bg-[#B07A2A]/10 text-[#1F2A44]'
+                    : 'border-[#E6E0D0] bg-white text-[#4A5468] hover:border-[#B07A2A]',
+                )}
+              >
+                <span className="flex items-center gap-1.5 text-sm font-semibold">
+                  <AreaIcon className="size-4 shrink-0 text-[#0B7F99]" aria-hidden="true" />
                   {areaTitle(key)}
-                </button>
-              ))}
-            </div>
+                </span>
+                <span className="text-[11px] leading-4 text-[#4A5468]">{areaDescription(key)}</span>
+              </button>
+            ))}
           </div>
-        </details>
+        </fieldset>
 
         {activeAreaConfig.hasUploadPeriod && activePeriod && (
-          <details className="client-upload-period-details rounded-xl border border-[#E6E0D0] bg-white px-3">
-            <summary className="flex min-h-11 cursor-pointer items-center gap-2 text-xs font-semibold text-[#1F2A44]">
-              <CalendarClock className="size-4 text-[#0B7F99]" />
-              {monthLabel(activePeriod.month)} {activePeriod.year}
-              <span className="ms-auto rounded-full bg-[#B07A2A]/10 px-2.5 py-1 text-[10px] text-[#8A5E1F]">{t3(lang, 'Change', 'Ändern', 'تغيير')}</span>
-            </summary>
-            <fieldset className="grid grid-cols-2 gap-3 border-t border-[#E6E0D0] py-3">
-              <legend className="sr-only">{t3(lang, 'Upload period', 'Abrechnungszeitraum', 'فترة الرفع')}</legend>
+          <fieldset className="grid grid-cols-2 gap-3 rounded-xl border border-[#E6E0D0] bg-white p-3">
+            <legend className="px-1 text-xs font-semibold uppercase tracking-[.12em] text-[#4A5468]">{t3(lang, 'Upload period', 'Abrechnungszeitraum', 'فترة الرفع')}</legend>
               <label className="text-[10px] font-semibold uppercase tracking-[.14em] text-[#4A5468]">{t3(lang, 'Month', 'Monat', 'الشهر')}
                 <select value={activePeriod.month} onChange={(event) => selectAvailablePeriod(activePeriod.year, Number(event.target.value))} className="mt-1.5 h-11 w-full rounded-xl border border-[#E6E0D0] bg-[#F8F6F1] px-3 text-sm font-normal normal-case tracking-normal text-[#1F2A44]">
                   {periodMonths.map((month) => <option key={month} value={month}>{monthLabel(month)}</option>)}
@@ -452,20 +461,14 @@ export default function ClientDocumentUploadPage({
                   {periodYears.map((year) => <option key={year} value={year}>{year}</option>)}
                 </select>
               </label>
-            </fieldset>
-          </details>
+          </fieldset>
         )}
 
-        <details className="client-document-type-details rounded-xl border border-[#E6E0D0] bg-white px-3">
-          <summary className="flex min-h-11 cursor-pointer items-center gap-2 text-xs font-semibold text-[#1F2A44]">
-            <span className="min-w-0 flex-1 truncate">{selectedType ? typeLabel(selectedType) : t3(lang, 'Document type', 'Art der Unterlagen', 'نوع المستند')}</span>
-            <span className="shrink-0 rounded-full bg-[#B07A2A]/10 px-2.5 py-1 text-[10px] text-[#8A5E1F]">{t3(lang, 'Change', 'Ändern', 'تغيير')}</span>
-          </summary>
-          <fieldset className="client-document-type-picker border-t border-[#E6E0D0] py-3">
-            <legend className="sr-only">{t3(lang, 'Document type', 'Art der Unterlagen', 'نوع المستند')}</legend>
-            <div className="client-document-type-chips flex gap-2 overflow-x-auto">
+        <fieldset className="rounded-xl border border-[#E6E0D0] bg-white p-3">
+          <legend className="px-1 text-xs font-semibold uppercase tracking-[.12em] text-[#4A5468]">{t3(lang, 'Type of documents', 'Art der Unterlagen', 'نوع المستند')}</legend>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {AREA_CHECKBOXES[activeArea].map((item) => (
-                <label key={item.id} className={cx('flex min-h-11 cursor-pointer items-center gap-2.5 rounded-xl border bg-white px-3 py-2 text-sm leading-5 transition-colors hover:border-[#B07A2A] focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[#0B7F99]', selectedTypeId === item.id ? 'border-[#B07A2A] text-[#1F2A44]' : 'border-[#E6E0D0] text-[#4A5468]')}>
+                <label key={item.id} className={cx('flex min-h-11 min-w-0 cursor-pointer items-center gap-2.5 rounded-xl border bg-white px-3 py-2 text-sm leading-5 transition-colors hover:border-[#B07A2A] focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[#0B7F99]', selectedTypeId === item.id ? 'border-[#B07A2A] bg-[#B07A2A]/5 text-[#1F2A44]' : 'border-[#E6E0D0] text-[#4A5468]')}>
                   <input type="radio" name="upload-document-type" value={item.id} checked={selectedTypeId === item.id} onChange={() => chooseType(item.id, item.category)} className="sr-only" />
                   <span aria-hidden="true" className={cx('grid size-4 shrink-0 place-items-center rounded border', selectedTypeId === item.id ? 'border-[#0B7F99] bg-[#0B7F99] text-white' : 'border-[#9AA0A6] bg-white')}>
                     {selectedTypeId === item.id && <Check className="size-3" strokeWidth={3} />}
@@ -474,8 +477,7 @@ export default function ClientDocumentUploadPage({
                 </label>
               ))}
             </div>
-          </fieldset>
-        </details>
+        </fieldset>
 
         <section id="client-upload" className="scroll-mt-24 space-y-4" aria-label={t3(lang, 'Upload form', 'Upload-Formular', 'نموذج الرفع')}>
           <motion.div
@@ -522,10 +524,9 @@ export default function ClientDocumentUploadPage({
             </div>
           </motion.div>
 
-          <details className="client-upload-note rounded-xl border border-[#E6E0D0] bg-white px-3">
-            <summary className="flex min-h-11 cursor-pointer items-center text-xs font-semibold text-[#1F2A44]">{t3(lang, 'Add a note (optional)', 'Notiz hinzufügen (optional)', 'أضف ملاحظة (اختياري)')}</summary>
-            <label className="block pb-3 text-start text-[10px] font-semibold uppercase tracking-[.14em] text-slate-500">
-            {t3(lang, 'Note', 'Notiz', 'ملاحظة')}
+          <div className="rounded-xl border border-[#E6E0D0] bg-white p-3">
+            <label className="block text-start text-xs font-semibold text-[#1F2A44]">
+            {t3(lang, 'Note (optional)', 'Notiz (optional)', 'ملاحظة (اختياري)')}
             <textarea
               rows={3}
               value={uploadNote}
@@ -534,7 +535,7 @@ export default function ClientDocumentUploadPage({
               className="mt-1.5 min-h-20 w-full resize-y rounded-xl border border-[#e8e2d2] bg-[#faf9f6] p-3 text-sm font-normal normal-case tracking-normal text-[#0f1f3d] outline-none placeholder:text-slate-400 focus:border-[#c9a24b]"
             />
             </label>
-          </details>
+          </div>
 
           {activePeriodDocuments.length > 0 && (
             <details
