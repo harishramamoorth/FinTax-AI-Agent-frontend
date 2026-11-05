@@ -33,7 +33,7 @@ export default function StatFlow({
   const reduce = useReducedMotion();
 
   return (
-   <ol className={`stat-flow grid ${variant === 'sidebar' ? 'grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-4 2xl:grid-cols-6' : variant === 'staffTiles' ? 'grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 2xl:grid-cols-5' : 'grid-cols-4 gap-2 sm:gap-4 lg:gap-6'} ${surface === 'panel' ? 'stat-flow--panel' : ''} ${variant === 'sidebar' ? 'stat-flow--sidebar' : ''} ${variant === 'staffTiles' ? 'stat-flow--staff-tiles' : ''}`}>
+   <ol className={`stat-flow grid ${variant === 'sidebar' ? 'grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-4 lg:grid-cols-6' : variant === 'staffTiles' ? 'grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 2xl:grid-cols-5' : 'grid-cols-4 gap-2 sm:gap-4 lg:gap-6'} ${surface === 'panel' ? 'stat-flow--panel' : ''} ${variant === 'sidebar' ? 'stat-flow--sidebar' : ''} ${variant === 'staffTiles' ? 'stat-flow--staff-tiles' : ''}`}>
       {items.map((item, index) => {
         const active = item.key === activeKey;
         const last = index === items.length - 1;

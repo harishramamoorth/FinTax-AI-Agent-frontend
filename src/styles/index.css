@@ -2241,41 +2241,10 @@ textarea, input, select { color-scheme: inherit; }
   }
 
   .admin-mobile-overview-tabs {
-    position: sticky;
-    top: 64px;
-    z-index: 15;
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 4px;
-    border: 1px solid #e3e8ef;
-    border-radius: 14px;
-    background: rgb(255 255 255 / .94);
-    padding: 4px;
-    box-shadow: 0 8px 20px -16px rgb(15 23 42 / .35);
-    backdrop-filter: blur(12px);
-  }
-
-  .admin-mobile-overview-tabs button {
-    min-width: 0;
-    min-height: 40px;
-    border-radius: 10px;
-    padding-inline: 3px;
-    color: #647084;
-    font-size: 11px;
-    font-weight: 600;
-    white-space: nowrap;
-  }
-
-  .admin-mobile-overview-tabs button.is-active {
-    background: #edf2fb;
-    color: #244fa8;
-  }
-
-  .admin-mobile-overview-panel {
     display: none;
   }
 
-  .admin-mobile-overview-panel.is-selected {
+  .admin-mobile-overview-panel {
     display: block;
   }
 
