@@ -51,8 +51,12 @@ export async function authenticateDemoUser(role: DemoRole, credentials: DemoCred
   }
 
   const expectedUsername = role === 'staff' ? 'staffdemo' : 'admindemo';
+  const expectedEmail = role === 'staff' ? 'lena@fintax.demo' : 'admin@fintax.demo';
   const expectedPassword = role === 'staff' ? 'staff123' : 'admin123';
-  if (credentials.username !== expectedUsername) throw new DemoLoginError('username', 'Invalid username or password.');
+  const username = credentials.username?.trim().toLowerCase();
+  if (username !== expectedUsername && username !== expectedEmail) {
+    throw new DemoLoginError('username', 'Invalid username or password.');
+  }
   if (credentials.password !== expectedPassword) throw new DemoLoginError('password', 'Invalid username or password.');
 
   return role === 'staff'

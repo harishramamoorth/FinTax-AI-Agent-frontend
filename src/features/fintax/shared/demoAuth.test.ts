@@ -22,6 +22,13 @@ describe('demo role authentication', () => {
       .resolves.toMatchObject({ role: 'admin' });
   });
 
+  it('accepts staff and admin email addresses as sign-in identifiers', async () => {
+    await expect(authenticateDemoUser('staff', { username: 'LENA@FINTAX.DEMO', password: 'staff123' }))
+      .resolves.toMatchObject({ role: 'staff', email: 'lena@fintax.demo' });
+    await expect(authenticateDemoUser('admin', { username: 'admin@fintax.demo', password: 'admin123' }))
+      .resolves.toMatchObject({ role: 'admin' });
+  });
+
   it('rejects invalid client identifiers and credentials on their respective fields', async () => {
     await expect(authenticateDemoUser('client', {
       advisorId: 'wrong', clientName: 'clientdemo', password: 'client123',

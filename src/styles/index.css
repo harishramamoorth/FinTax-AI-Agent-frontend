@@ -1895,7 +1895,7 @@ textarea, input, select { color-scheme: inherit; }
 
 /* Staff overview tiles use live counts and direct page actions. */
 .stat-flow--staff-tiles {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -2142,6 +2142,12 @@ textarea, input, select { color-scheme: inherit; }
   }
 }
 
+@media (min-width: 1200px) {
+  .stat-flow--staff-tiles {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 639px) {
   .staff-metrics {
     overflow: visible;
@@ -2155,9 +2161,9 @@ textarea, input, select { color-scheme: inherit; }
   }
 
   .stat-flow__tile {
-    min-height: 96px;
-    border-radius: 13px;
-    padding: 9px;
+    min-height: 110px;
+    border-radius: 15px;
+    padding: 10px;
   }
 
   .stat-flow__tile-top {
@@ -2195,12 +2201,9 @@ textarea, input, select { color-scheme: inherit; }
     display: block;
     max-width: 100%;
     margin-top: 3px;
-    overflow: hidden;
     font-size: clamp(10px, 2.7vw, 12px);
     font-weight: 650;
-    line-height: 1.2;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    line-height: 1.25;
   }
 
   .stat-flow__tile-hint {
@@ -2257,39 +2260,66 @@ textarea, input, select { color-scheme: inherit; }
   padding: 10px 16px;
 }
 
-.staff-workflow-panel .staff-workflow-canvas {
-  min-height: 300px;
-  aspect-ratio: 1000 / 370;
+.staff-workflow-steps::before {
+  position: absolute;
+  z-index: -1;
+  content: "";
+  inset-inline-start: 39px;
+  top: 56px;
+  bottom: 32px;
+  border-inline-start: 2px dashed #cbd5e1;
 }
 
-.staff-workflow-panel .staff-workflow-steps {
-  gap: 0;
-  padding: 8px 12px;
+.staff-workflow-steps::after {
+  position: absolute;
+  z-index: -1;
+  content: "";
+  inset-inline-start: 39px;
+  top: 56px;
+  bottom: 32px;
+  border-inline-start: 2px solid #22b8a6;
+  transform: scaleY(var(--workflow-progress, 0));
+  transform-origin: top;
+  transition: transform 650ms cubic-bezier(.22, 1, .36, 1);
 }
 
-.staff-workflow-panel .staff-workflow-step-button {
-  min-height: 76px;
-  gap: 8px;
-  padding: 8px;
+@media (min-width: 640px) {
+  .staff-workflow-steps::before,
+  .staff-workflow-steps::after {
+    display: none;
+  }
 }
 
-.staff-workflow-panel .staff-workflow-step-icon {
-  width: 40px;
-  height: 40px;
-}
+@media (min-width: 1280px) {
+  .staff-workflow-steps::before {
+    display: block;
+    inset-inline: 10%;
+    top: 68px;
+    bottom: auto;
+    border-top: 2px dashed #cbd5e1;
+    border-inline-start: 0;
+  }
 
-.staff-workflow-panel .staff-workflow-footer {
-  gap: 8px;
-  padding: 10px 14px;
-}
-
-.staff-workflow-panel .staff-workflow-note {
-  padding: 0 14px 10px;
+  .staff-workflow-steps::after {
+    display: block;
+    inset-inline: 10%;
+    top: 68px;
+    bottom: auto;
+    border-top: 2px solid #22b8a6;
+    border-inline-start: 0;
+    transform: scaleX(var(--workflow-progress, 0));
+    transform-origin: left;
+    transition: transform 650ms cubic-bezier(.22, 1, .36, 1);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .stat-flow__live-dot {
     animation: none;
+  }
+
+  .staff-workflow-steps::after {
+    transition: none;
   }
 }
 
@@ -2537,6 +2567,10 @@ textarea, input, select { color-scheme: inherit; }
   background: linear-gradient(145deg, rgb(var(--blue)), rgb(var(--cyan)));
   color: rgb(var(--bg));
   box-shadow: 0 6px 16px rgb(var(--shadow) / .34), 0 0 0 4px rgb(var(--panel) / .96);
+}
+
+.workspace-bottom-tab--featured.is-active .workspace-bottom-icon {
+  box-shadow: 0 7px 18px rgb(var(--shadow) / .4), 0 0 0 4px rgb(var(--panel) / .96), 0 0 0 7px rgb(var(--cyan) / .14);
 }
 
 .workspace-bottom-tab--featured:hover .workspace-bottom-icon,
@@ -4541,5 +4575,119 @@ textarea, input, select { color-scheme: inherit; }
     min-height: 36px;
     margin-top: 4px;
     font-size: 12px;
+  }
+}
+
+@media (max-width: 767px) {
+  .fintax-auth--staff {
+    padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right))
+      max(16px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  }
+
+  .fintax-auth--staff > div.relative.z-10 {
+    max-width: 440px;
+  }
+
+  .fintax-auth--staff .auth-form-panel {
+    padding: 20px 18px max(20px, env(safe-area-inset-bottom));
+  }
+
+  .fintax-auth--staff .auth-role-option {
+    min-height: 48px;
+    flex-direction: row;
+    gap: 7px;
+    padding: 8px;
+    font-size: 12px;
+  }
+
+  .fintax-auth--staff .auth-input-wrap {
+    height: 52px;
+  }
+
+  .fintax-auth--staff .auth-input-wrap input {
+    font-size: 16px;
+  }
+
+  .fintax-auth--staff form > button[type="submit"] {
+    height: 52px;
+  }
+}
+
+@media (max-width: 767px) and (max-height: 740px) {
+  .fintax-auth--staff {
+    padding-top: max(8px, env(safe-area-inset-top));
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+
+  .fintax-auth--staff .auth-login-topbar {
+    margin-bottom: 8px;
+  }
+
+  .fintax-auth--staff .auth-login-header,
+  .fintax-auth--staff .auth-login-brand {
+    min-height: 48px;
+  }
+
+  .fintax-auth--staff .auth-login-brand {
+    padding-block: 4px;
+  }
+
+  .fintax-auth--staff .auth-login-brand img {
+    max-height: 40px;
+  }
+
+  .fintax-auth--staff .auth-login-topbar > label {
+    min-height: 40px;
+  }
+
+  .fintax-auth--staff .auth-form-panel {
+    padding: 12px 16px max(12px, env(safe-area-inset-bottom));
+  }
+
+  .fintax-auth--staff .auth-form-panel form > .auth-icon-circle {
+    width: 38px;
+    height: 38px;
+  }
+
+  .fintax-auth--staff .auth-form-panel form > .auth-icon-circle + p {
+    margin-top: 8px;
+  }
+
+  .fintax-auth--staff .auth-form-panel h1 {
+    margin-top: 2px;
+    font-size: 1.65rem;
+  }
+
+  .fintax-auth--staff .auth-form-panel h1 + p {
+    margin-top: 6px;
+    line-height: 1.4;
+  }
+
+  .fintax-auth--staff form > div.mt-6 {
+    margin-top: 10px;
+  }
+
+  .fintax-auth--staff .auth-role-option {
+    min-height: 44px;
+  }
+
+  .fintax-auth--staff .auth-field-label {
+    margin-top: 8px;
+  }
+
+  .fintax-auth--staff .auth-input-wrap {
+    height: 48px;
+  }
+
+  .fintax-auth--staff form > button[type="submit"] {
+    margin-top: 14px;
+  }
+
+  .fintax-auth--staff form > div.mt-4 {
+    margin-top: 10px;
+  }
+
+  .fintax-auth--staff form > p.mt-4 {
+    margin-top: 8px;
   }
 }

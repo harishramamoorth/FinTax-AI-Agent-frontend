@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import {
-  ArrowDownToLine, ArrowRight, Banknote, ClipboardCheck, FileSearch,
+  ArrowDownToLine, Banknote, ClipboardCheck, FileSearch,
   MessageSquareText, ShieldCheck, Upload, type LucideIcon,
 } from 'lucide-react';
 
@@ -298,27 +298,11 @@ const STAFF_STEPS: {
   color: string;
   tag: (counts: Counts) => string;
 }[] = [
-  { number: 1, title: 'Client submissions', detail: 'Triage files clients submitted for the selected month.', screen: 'uploads', icon: Upload, color: '#84cc16', tag: (counts) => `${counts.upload} files in demo` },
+  { number: 1, title: 'Client submissions', detail: 'Triage files clients submitted for the selected month.', screen: 'uploads', icon: Upload, color: '#84cc16', tag: (counts) => `${counts.upload} client files` },
   { number: 2, title: 'Extract & classify', detail: 'Check the suggested type and locally extracted fields.', screen: 'documents', icon: FileSearch, color: '#10b981', tag: (counts) => `${counts.extract} processing` },
   { number: 3, title: 'Validation checks', detail: 'Resolve date, amount, duplicate, or extraction warnings.', screen: 'review', icon: ShieldCheck, color: '#06b6d4', tag: (counts) => `${counts.validate} need attention` },
   { number: 4, title: 'Staff review', detail: 'Verify the original, correct fields, or ask the client for details.', screen: 'review', icon: ClipboardCheck, color: '#2563eb', tag: (counts) => `${counts.review} ready to review` },
   { number: 5, title: 'Accounting export', detail: 'Export approved accounting records for the selected period.', screen: 'exports', icon: ArrowDownToLine, color: '#7c3aed', tag: (counts) => `${counts.export} export-ready` },
-];
-
-const STAFF_NODES = [
-  { x: 115, y: 385 },
-  { x: 270, y: 235 },
-  { x: 435, y: 105 },
-  { x: 610, y: 350 },
-  { x: 835, y: 220 },
-];
-
-const STAFF_LABELS = [
-  { x: '20%', y: '76%', width: '25%' },
-  { x: '33%', y: '52%', width: '24%' },
-  { x: '50%', y: '8%', width: '27%' },
-  { x: '67%', y: '67%', width: '27%' },
-  { x: '68%', y: '56%', width: '25%' },
 ];
 
 export function StaffWorkflow({
@@ -329,124 +313,62 @@ export function StaffWorkflow({
   onNavigate: (screen: Target) => void;
 }) {
   const reduceMotion = useReducedMotion();
-  const container = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(0);
-  const path = `M${STAFF_NODES[0].x} ${STAFF_NODES[0].y} C155 372 190 314 ${STAFF_NODES[1].x} ${STAFF_NODES[1].y} S350 112 ${STAFF_NODES[2].x} ${STAFF_NODES[2].y} C520 78 560 214 ${STAFF_NODES[3].x} ${STAFF_NODES[3].y} S760 335 ${STAFF_NODES[4].x} ${STAFF_NODES[4].y} Q850 105 945 55`;
-
-  useEffect(() => {
-    const element = container.current;
-    if (!element) return;
-    const observer = new ResizeObserver(([entry]) => setWidth(Math.round(entry.contentRect.width)));
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-
-  const wide = width >= 700;
+  const nextStep = counts.validate > 0 ? 2
+    : counts.review > 0 ? 3
+      : counts.extract > 0 ? 1
+        : counts.export > 0 ? 4 : 0;
 
   return (
-    <div ref={container} className="min-w-0">
-      {wide ? (
-        <div className="staff-workflow-canvas relative mx-1 my-2 overflow-hidden rounded-2xl bg-gradient-to-br from-white via-slate-50/70 to-cyan-50/50 sm:mx-3">
-          <svg viewBox="0 0 1000 470" preserveAspectRatio="none" className="absolute inset-0 size-full" fill="none" aria-hidden="true">
-            <path d={path} stroke="#cbd5e1" strokeWidth="3" strokeDasharray="2 10" strokeLinecap="round" />
-            {!reduceMotion && <circle r="5" fill="#0e7490"><animateMotion dur="9s" repeatCount="indefinite" path={path} /></circle>}
-            <defs>
-              <radialGradient id="staff-workflow-glow"><stop stopColor="#bae6fd" stopOpacity=".55" /><stop offset="1" stopColor="#fff" stopOpacity="0" /></radialGradient>
-            </defs>
-            <circle cx="500" cy="235" r="285" fill="url(#staff-workflow-glow)" />
-          </svg>
-
-          {STAFF_STEPS.map((step, index) => {
-            const Icon = step.icon;
-            const circumference = 2 * Math.PI * 37;
-            const active = index === 0 ? counts.upload > 0 : index === 1 ? counts.extract > 0 : index === 2 ? counts.validate > 0 : index === 3 ? counts.review > 0 : counts.export > 0;
-            return (
-              <div key={step.number}>
-                <motion.button
-                  type="button"
-                  aria-label={`Step ${step.number}: ${step.title}. ${step.tag(counts)}`}
-                  onClick={() => onNavigate(step.screen)}
-                  className="absolute z-10 grid size-[76px] -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white shadow-[0_12px_32px_-12px_rgba(15,23,42,.32)] ring-1 ring-slate-200/80 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600 sm:size-[84px]"
-                  style={{ left: `${STAFF_NODES[index].x / 10}%`, top: `${STAFF_NODES[index].y / 4.7}%` }}
-                  whileHover={reduceMotion ? undefined : { scale: 1.08, rotate: index % 2 ? -3 : 3 }}
-                  whileTap={reduceMotion ? undefined : { scale: 0.96 }}
-                  initial={reduceMotion ? false : { opacity: 0, scale: 0.65 }}
-                  whileInView={{ opacity: 1, scale: 1 }}
-                  viewport={{ once: true, amount: 0.5 }}
-                  transition={{ type: 'spring', stiffness: 180, damping: 17, delay: index * 0.12 }}
-                >
-                  <svg viewBox="0 0 84 84" className="absolute inset-0 size-full -rotate-90" aria-hidden="true">
-                    <circle cx="42" cy="42" r="37" stroke="#e2e8f0" strokeWidth="5" fill="none" />
-                    <motion.circle
-                      cx="42" cy="42" r="37" stroke={step.color} strokeWidth="5" strokeLinecap="round" fill="none"
-                      strokeDasharray={circumference}
-                      initial={reduceMotion ? false : { strokeDashoffset: circumference }}
-                      whileInView={{ strokeDashoffset: active ? circumference * 0.12 : circumference * 0.28 }}
-                      viewport={{ once: true }}
-                      transition={{ duration: 1.1, delay: index * 0.1, ease: 'easeOut' }}
-                    />
-                  </svg>
-                  <span className="grid size-12 place-items-center rounded-full bg-white transition-colors" style={{ color: step.color }}>
-                    <Icon className="size-6" />
-                  </span>
-                  <span className="absolute -bottom-2 -right-1 grid size-6 place-items-center rounded-full border-2 border-white bg-slate-900 text-[9px] font-bold text-white">{String(step.number).padStart(2, '0')}</span>
-                </motion.button>
-                <motion.button
-                  type="button"
-                  onClick={() => onNavigate(step.screen)}
-                  className="absolute z-10 rounded-xl p-2 text-left transition-colors hover:bg-white/75 focus-visible:outline-2 focus-visible:outline-blue-600"
-                  style={{ left: STAFF_LABELS[index].x, top: STAFF_LABELS[index].y, width: STAFF_LABELS[index].width }}
-                  initial={reduceMotion ? false : { opacity: 0, y: 12 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true, amount: 0.4 }}
-                  transition={{ duration: 0.45, delay: 0.18 + index * 0.1 }}
-                >
-                  <span className="block text-[10px] font-semibold uppercase tracking-[.14em]" style={{ color: step.color }}>Step {String(step.number).padStart(2, '0')}</span>
-                  <span className="mt-0.5 block text-[13px] font-bold leading-5 text-slate-900 sm:text-sm">{step.title}</span>
-                  <span className="mt-1 block text-[10px] leading-4 text-slate-600 sm:text-[11px]">{step.detail}</span>
-                  <span className="mt-2 inline-flex max-w-full rounded-full px-2 py-1 text-[9px] font-semibold sm:text-[10px]" style={{ color: step.color, backgroundColor: `${step.color}14` }}>{step.tag(counts)}</span>
-                </motion.button>
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <ol className="staff-workflow-steps space-y-1 p-3 sm:p-5">
-          {STAFF_STEPS.map((step, index) => {
-            const Icon = step.icon;
-            const active = index === 0 ? counts.upload > 0 : index === 1 ? counts.extract > 0 : index === 2 ? counts.validate > 0 : index === 3 ? counts.review > 0 : counts.export > 0;
-            return (
-              <li key={step.number} className="relative">
-                {index < STAFF_STEPS.length - 1 && <span aria-hidden="true" className="absolute bottom-0 left-[27px] top-14 w-px bg-slate-200" />}
-                <motion.button
-                  type="button"
-                  onClick={() => onNavigate(step.screen)}
-                  className="staff-workflow-step-button relative flex min-h-[76px] w-full items-center gap-2 rounded-2xl p-2 text-left transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600"
-                  initial={reduceMotion ? false : { opacity: 0, x: -12 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ duration: 0.35, delay: index * 0.08 }}
-                >
-                  <span className="staff-workflow-step-icon relative grid size-10 shrink-0 place-items-center rounded-full border-[3px] bg-white shadow-sm" style={{ borderColor: active ? step.color : '#e2e8f0', color: step.color }}>
-                    <Icon className="size-5" />
-                    <span className="absolute -bottom-1 -right-1 grid size-5 place-items-center rounded-full bg-slate-900 text-[8px] font-bold text-white">{String(step.number).padStart(2, '0')}</span>
-                  </span>
-                  <span className="min-w-0 flex-1 py-1"><span className="block text-sm font-semibold text-slate-900">{step.title}</span><span className="mt-0.5 block text-[11px] leading-4 text-slate-600">{step.detail}</span><span className="mt-1.5 inline-block rounded-full px-2 py-0.5 text-[9px] font-semibold" style={{ color: step.color, backgroundColor: `${step.color}14` }}>{step.tag(counts)}</span></span>
-                  <ArrowRight className="size-4 shrink-0 text-slate-400" />
-                </motion.button>
-              </li>
-            );
-          })}
-        </ol>
-      )}
-      <div className="staff-workflow-footer flex flex-col gap-2 border-t border-slate-100 px-4 py-4 sm:flex-row sm:px-6">
-        <motion.button type="button" onClick={() => onNavigate('documents')} whileTap={reduceMotion ? undefined : { scale: 0.98 }} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-cyan-700 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-cyan-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-700 sm:w-auto">
-          <Upload className="size-4" />Open document intake
+    <div className="min-w-0">
+      <ol
+        className="staff-workflow-steps relative isolate grid gap-2.5 p-3 sm:grid-cols-2 sm:gap-3 sm:p-5 xl:grid-cols-5 xl:gap-3"
+        style={{ '--workflow-progress': `${(nextStep / (STAFF_STEPS.length - 1)) * 100}%` } as React.CSSProperties}
+      >
+        {STAFF_STEPS.map((step, index) => {
+          const Icon = step.icon;
+          const next = index === nextStep;
+          return (
+            <li key={step.number} aria-current={next ? 'step' : undefined} className="relative z-10 min-w-0">
+              <motion.button
+                type="button"
+                aria-label={`Step ${step.number}: ${step.title}. ${step.tag(counts)}${next ? '. Next step' : ''}`}
+                onClick={() => onNavigate(step.screen)}
+                initial={reduceMotion ? false : { opacity: 0, y: 14, scale: 0.97 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                whileHover={reduceMotion ? undefined : { y: -4, scale: 1.015 }}
+                whileTap={reduceMotion ? undefined : { scale: 0.985 }}
+                transition={reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 280, damping: 23, delay: index * 0.09 }}
+                className={`grid min-h-[104px] w-full grid-cols-[36px_minmax(0,1fr)] grid-rows-[auto_1fr_auto] gap-x-2 gap-y-1 rounded-2xl border p-2.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-700 sm:min-h-[132px] sm:grid-cols-[44px_minmax(0,1fr)] sm:gap-x-3 sm:gap-y-2 sm:p-3.5 xl:flex xl:min-h-[224px] xl:flex-col xl:items-center xl:p-4 xl:text-center ${next ? 'border-cyan-500 bg-cyan-50/90 shadow-sm' : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'}`}
+              >
+                <span className="col-span-2 flex w-full items-center justify-between gap-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Step {String(step.number).padStart(2, '0')}</span>
+                  {next
+                    ? <span className="rounded-full bg-cyan-700 px-2 py-0.5 text-[9px] font-semibold text-white">NEXT</span>
+                    : <span className="text-[10px] font-medium text-slate-400"> {step.number} / 5</span>}
+                </span>
+                <span className="relative col-start-1 row-start-2 grid size-9 place-items-center self-start rounded-full border-2 bg-white sm:size-11 xl:mt-3 xl:size-12 xl:self-auto" style={{ borderColor: `${step.color}70`, color: step.color }}>
+                  {next && !reduceMotion && <motion.span aria-hidden="true" className="absolute inset-[-5px] rounded-full border border-cyan-500" animate={{ scale: [1, 1.35], opacity: [0.55, 0] }} transition={{ duration: 1.8, repeat: Infinity, ease: 'easeOut' }} />}
+                  <Icon className="size-5" aria-hidden="true" />
+                </span>
+                <span className="col-start-2 row-start-2 min-w-0 self-center xl:mt-3 xl:flex xl:flex-1 xl:flex-col xl:items-center">
+                  <span className="block text-sm font-semibold leading-5 text-slate-900">{step.title}</span>
+                  <span className="mt-0.5 line-clamp-1 block text-[10px] leading-4 text-slate-600 sm:mt-1 sm:line-clamp-2 sm:text-[11px]">{step.detail}</span>
+                </span>
+                <span className="col-start-2 row-start-3 inline-flex w-fit max-w-full items-center rounded-full px-2 py-1 text-[10px] font-semibold xl:mt-3" style={{ color: step.color, backgroundColor: `${step.color}14` }}>{step.tag(counts)}</span>
+              </motion.button>
+            </li>
+          );
+        })}
+      </ol>
+      <div className="flex flex-col gap-2 border-t border-slate-100 px-4 py-4 sm:flex-row sm:px-6">
+        <motion.button type="button" onClick={() => onNavigate('uploads')} whileTap={reduceMotion ? undefined : { scale: 0.98 }} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-cyan-700 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-cyan-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-700 sm:w-auto">
+          <Upload className="size-4" />Open client inbox
         </motion.button>
         <motion.button type="button" onClick={() => onNavigate('review')} whileTap={reduceMotion ? undefined : { scale: 0.98 }} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 text-sm font-medium text-slate-800 transition hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-700 sm:w-auto">
           <ClipboardCheck className="size-4" />Review queue ({reviewCount})
         </motion.button>
       </div>
-      <p className="staff-workflow-note px-4 pb-4 text-[10px] text-slate-500 sm:px-6">Demo workflow · files are processed in this browser; verify extracted values before approving.</p>
+      <p className="px-4 pb-4 text-[10px] leading-4 text-slate-500 sm:px-6">Client submissions appear in the staff inbox; approved records are available to Admin for export. Demo files are processed in this browser—verify extracted values before approving.</p>
     </div>
   );
 }

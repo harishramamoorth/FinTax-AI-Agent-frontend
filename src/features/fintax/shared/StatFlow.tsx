@@ -33,7 +33,7 @@ export default function StatFlow({
   const reduce = useReducedMotion();
 
   return (
-   <ol className={`stat-flow grid ${variant === 'sidebar' ? 'grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-4 lg:grid-cols-6' : variant === 'staffTiles' ? 'grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 2xl:grid-cols-5' : 'grid-cols-4 gap-2 sm:gap-4 lg:gap-6'} ${surface === 'panel' ? 'stat-flow--panel' : ''} ${variant === 'sidebar' ? 'stat-flow--sidebar' : ''} ${variant === 'staffTiles' ? 'stat-flow--staff-tiles' : ''}`}>
+   <ol className={`stat-flow grid ${variant === 'sidebar' ? 'grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-4 lg:grid-cols-6' : variant === 'staffTiles' ? 'grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 xl:grid-cols-6' : 'grid-cols-4 gap-2 sm:gap-4 lg:gap-6'} ${surface === 'panel' ? 'stat-flow--panel' : ''} ${variant === 'sidebar' ? 'stat-flow--sidebar' : ''} ${variant === 'staffTiles' ? 'stat-flow--staff-tiles' : ''}`}>
       {items.map((item, index) => {
         const active = item.key === activeKey;
         const last = index === items.length - 1;
@@ -44,12 +44,12 @@ export default function StatFlow({
           <motion.li
             key={item.key}
             className="stat-flow__item relative min-w-0"
-            initial={reduce ? false : { opacity: 0, x: 18 }}
-            whileInView={{ opacity: 1, x: 0 }}
+            initial={reduce ? false : { opacity: 0, y: 12 }}
+            whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, amount: 0.2 }}
             transition={{
-              duration: 0.55,
-              delay: index * 0.12,
+              duration: reduce ? 0 : 0.38,
+              delay: reduce ? 0 : index * 0.055,
               ease: EASE,
             }}
           >

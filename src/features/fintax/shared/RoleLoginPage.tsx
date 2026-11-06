@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type InputHTMLAttributes, type ReactNode } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import {
   Building2,
@@ -19,7 +19,6 @@ import {
 
 import { Button } from '@/components/ui/primitives';
 import fintaxLogo from './fintax-logo.png';
-import { type DemoRole } from './demoAccounts';
 import { authenticateDemoUser, DemoLoginError, type DemoCredentials, type LoginField } from './demoAuth';
 import { isRtl, usePortalLanguage, type PortalLanguage } from './portalLanguage';
 
@@ -62,6 +61,7 @@ const loginTranslations = {
     advisorHint: '7 = FinTax Consulting',
     clientName: 'Username / Client Name',
     username: 'Username',
+    staffUsername: 'Staff username or work email',
     password: 'Password',
     clientDemo: 'demo: clientdemo',
     staffDemo: 'demo: staffdemo',
@@ -91,7 +91,7 @@ const loginTranslations = {
     support: 'FinTax Consulting Support',
     advisorIdShort: 'Advisor ID:',
     supportContact: 'Support Contact:',
-    demoLogin: 'Demo login (Advisor ID, client name, password):',
+    demoLogin: 'Demo sign-in details:',
     emailHelp: 'For account help, contact your tax advisory firm.',
     close: 'Close',
   },
@@ -128,6 +128,7 @@ const loginTranslations = {
     advisorHint: '7 = FinTax Consulting',
     clientName: 'Benutzername / Mandantenname',
     username: 'Benutzername',
+    staffUsername: 'Mitarbeiter-Benutzername oder E-Mail',
     password: 'Passwort',
     clientDemo: 'Demo: clientdemo',
     staffDemo: 'Demo: staffdemo',
@@ -157,7 +158,7 @@ const loginTranslations = {
     support: 'FinTax Consulting Support',
     advisorIdShort: 'Berater-ID:',
     supportContact: 'Supportkontakt:',
-    demoLogin: 'Demo-Zugang (Berater-ID, Mandantenname, Passwort):',
+    demoLogin: 'Demo-Anmeldedaten:',
     emailHelp: 'Bei Fragen zu Ihrem Konto wenden Sie sich bitte an Ihre Steuerberatung.',
     close: 'Schließen',
   },
@@ -194,6 +195,7 @@ const loginTranslations = {
     advisorHint: '7 = FinTax Consulting',
     clientName: 'اسم المستخدم / العميل',
     username: 'اسم المستخدم',
+    staffUsername: 'اسم مستخدم الموظف أو البريد الإلكتروني',
     password: 'كلمة المرور',
     clientDemo: 'تجريبي: clientdemo',
     staffDemo: 'تجريبي: staffdemo',
@@ -223,7 +225,7 @@ const loginTranslations = {
     support: 'دعم FinTax Consulting',
     advisorIdShort: 'رقم المستشار:',
     supportContact: 'جهة الدعم:',
-    demoLogin: 'الدخول التجريبي (رقم المستشار، اسم العميل، كلمة المرور):',
+    demoLogin: 'بيانات الدخول التجريبية:',
     emailHelp: 'للمساعدة بشأن الحساب، يرجى التواصل مع شركة الاستشارات الضريبية.',
     close: 'إغلاق',
   },
@@ -258,6 +260,7 @@ function LoginField({
   hint,
   icon,
   trailing,
+  inputProps,
 }: {
   id: string;
   label: string;
@@ -269,6 +272,7 @@ function LoginField({
   hint?: string;
   icon: ReactNode;
   trailing?: ReactNode;
+  inputProps?: Pick<InputHTMLAttributes<HTMLInputElement>, 'autoCapitalize' | 'autoCorrect' | 'spellCheck'>;
 }) {
   return (
     <label className="auth-field-label mt-4" htmlFor={id}>
@@ -282,6 +286,7 @@ function LoginField({
           id={id}
           type={type}
           autoComplete={autoComplete}
+          {...inputProps}
           required
           value={value}
           aria-invalid={Boolean(error)}
@@ -315,6 +320,9 @@ export default function RoleLoginPage({
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<LoginField, string>>>({});
   const [formError, setFormError] = useState('');
   const [forgotModalOpen, setForgotModalOpen] = useState(false);
+  const forgotTriggerRef = useRef<HTMLButtonElement>(null);
+  const forgotCloseRef = useRef<HTMLButtonElement>(null);
+  const forgotDialogRef = useRef<HTMLDivElement>(null);
   const language = usePortalLanguage((state) => state.language);
   const setLanguage = usePortalLanguage((state) => state.setLanguage);
   const rtl = isRtl(language);
@@ -323,6 +331,46 @@ export default function RoleLoginPage({
   const text = loginTranslations[language];
   const copy = text.portals[portal];
   const clientPortal = portal === 'client';
+  const demoCredentials = clientPortal
+    ? '7 · clientdemo · client123'
+    : portal === 'staff'
+      ? 'staffdemo or lena@fintax.demo · staff123'
+      : 'admindemo · admin123';
+
+  useEffect(() => {
+    if (!forgotModalOpen) return;
+
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    forgotCloseRef.current?.focus();
+    const handleDialogKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setForgotModalOpen(false);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const focusable = forgotDialogRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusable?.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleDialogKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleDialogKeyDown);
+      previousFocus?.focus();
+    };
+  }, [forgotModalOpen]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -336,15 +384,15 @@ export default function RoleLoginPage({
       : { username: username.trim(), password };
 
     try {
-      const session = await authenticateDemoUser(portal as DemoRole, credentials);
+      const session = await authenticateDemoUser(portal, credentials);
       onLogin(session);
     } catch (error) {
       if (clientPortal) {
         setFormError(text.invalidClient);
       } else if (error instanceof DemoLoginError) {
-        setFieldErrors({
-          [error.field]: error.field === 'username' ? text.invalidUsername : text.invalidPassword,
-        });
+        if (error.field === 'username') setFieldErrors({ username: text.invalidUsername });
+        else if (error.field === 'password') setFieldErrors({ password: text.invalidPassword });
+        else setFormError(text.loginFailure);
       } else {
         setFormError(text.loginFailure);
       }
@@ -365,7 +413,7 @@ export default function RoleLoginPage({
     <main
       dir={rtl ? 'rtl' : 'ltr'}
       lang={language}
-      className="fintax-auth relative flex h-[100dvh] min-h-screen items-start justify-center overflow-x-clip overflow-y-auto px-3 py-4 sm:px-6 sm:py-8 md:items-center"
+      className={`fintax-auth${portal === 'staff' ? ' fintax-auth--staff' : ''} relative flex h-[100dvh] min-h-screen items-start justify-center overflow-x-clip overflow-y-auto px-3 py-4 sm:px-6 sm:py-8 md:items-center`}
     >
       <div className="auth-background" aria-hidden="true">
         <motion.div
@@ -400,7 +448,11 @@ export default function RoleLoginPage({
             <select
               aria-label={text.language}
               value={language}
-              onChange={(e) => setLanguage(e.target.value as PortalLanguage)}
+              onChange={(e) => {
+                setLanguage(e.target.value as PortalLanguage);
+                setFieldErrors({});
+                setFormError('');
+              }}
               className="cursor-pointer bg-transparent py-0.5 text-xs font-semibold text-ink outline-none"
             >
               <option value="en">EN</option>
@@ -413,7 +465,7 @@ export default function RoleLoginPage({
         <section className="auth-card grid overflow-hidden md:grid-cols-2">
           <div className="auth-form-panel relative flex flex-col p-6 sm:p-9 lg:p-12">
             <div className="auth-small-glow" aria-hidden="true" />
-            <form onSubmit={submit} className="relative z-10 flex h-full flex-col">
+            <form onSubmit={submit} aria-busy={submitting} className="relative z-10 flex h-full flex-col">
               <div className="auth-icon-circle">
                 {clientPortal ? <UserRound size={24} /> : portal === 'staff' ? <BriefcaseBusiness size={24} /> : <ShieldCheck size={24} />}
               </div>
@@ -464,7 +516,10 @@ export default function RoleLoginPage({
                       label={text.advisorId}
                       hint={text.advisorHint}
                       value={advisorId}
-                      onChange={setAdvisorId}
+                      onChange={(value) => {
+                        setAdvisorId(value);
+                        if (fieldErrors.advisorId) setFieldErrors((errors) => ({ ...errors, advisorId: undefined }));
+                      }}
                       error={fieldErrors.advisorId}
                       autoComplete="username"
                       icon={<Building2 size={17} />}
@@ -474,7 +529,10 @@ export default function RoleLoginPage({
                       label={text.clientName}
                       hint={text.clientDemo}
                       value={clientName}
-                      onChange={setClientName}
+                      onChange={(value) => {
+                        setClientName(value);
+                        if (fieldErrors.clientName) setFieldErrors((errors) => ({ ...errors, clientName: undefined }));
+                      }}
                       error={fieldErrors.clientName}
                       autoComplete="username"
                       icon={<UserRound size={17} />}
@@ -483,13 +541,17 @@ export default function RoleLoginPage({
                 ) : (
                   <LoginField
                     id="portal-username"
-                    label={text.username}
+                    label={portal === 'staff' ? text.staffUsername : text.username}
                     hint={portal === 'staff' ? text.staffDemo : text.adminDemo}
                     value={username}
-                    onChange={setUsername}
+                    onChange={(value) => {
+                      setUsername(value);
+                      if (fieldErrors.username) setFieldErrors((errors) => ({ ...errors, username: undefined }));
+                    }}
                     error={fieldErrors.username}
                     autoComplete="username"
                     icon={<UserRound size={17} />}
+                    inputProps={{ autoCapitalize: 'none', autoCorrect: 'off', spellCheck: false }}
                   />
                 )}
 
@@ -498,7 +560,10 @@ export default function RoleLoginPage({
                   label={text.password}
                   hint={clientPortal ? text.clientPassword : portal === 'staff' ? text.staffPassword : text.adminPassword}
                   value={password}
-                  onChange={setPassword}
+                  onChange={(value) => {
+                    setPassword(value);
+                    if (fieldErrors.password) setFieldErrors((errors) => ({ ...errors, password: undefined }));
+                  }}
                   error={fieldErrors.password}
                   type={showPassword ? 'text' : 'password'}
                   autoComplete="current-password"
@@ -531,6 +596,7 @@ export default function RoleLoginPage({
               <div className="mt-4 text-center">
                 <button
                   type="button"
+                  ref={forgotTriggerRef}
                   onClick={() => setForgotModalOpen(true)}
                   className="text-xs font-medium text-cyan hover:underline decoration-cyan/40 underline-offset-4"
                 >
@@ -618,30 +684,41 @@ export default function RoleLoginPage({
       </motion.div>
 
       {/* Forgot Details Modal */}
-      <AnimatePresence>
-        {forgotModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      {forgotModalOpen && (
+          <motion.div
+            initial={reduceMotion ? false : { opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: reduceMotion ? 0 : 0.18 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          >
             <motion.div
-              initial={{ opacity: 0 }}
+              initial={reduceMotion ? false : { opacity: 0 }}
               animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              transition={{ duration: reduceMotion ? 0 : 0.18 }}
               onClick={() => setForgotModalOpen(false)}
+              aria-hidden="true"
               className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm"
             />
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
+              initial={reduceMotion ? false : { opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="relative z-10 w-full max-w-md rounded-2xl border border-ink/10 bg-white p-6 shadow-2xl text-ink"
+              transition={{ duration: reduceMotion ? 0 : 0.18 }}
+              ref={forgotDialogRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="forgot-login-title"
+              className="relative z-10 max-h-[min(90dvh,42rem)] w-full max-w-md overflow-y-auto rounded-2xl border border-ink/10 bg-white p-6 text-ink shadow-2xl"
             >
               <div className="flex items-center justify-between pb-3 border-b border-ink/5">
                 <div className="flex items-center gap-2 font-semibold">
                   <HelpCircle className="size-5 text-cyan" />
-                  <span>{text.forgot}</span>
+                  <span id="forgot-login-title">{text.forgot}</span>
                 </div>
                 <button
+                  ref={forgotCloseRef}
                   type="button"
                   onClick={() => setForgotModalOpen(false)}
+                  aria-label={text.close}
                   className="rounded-lg p-1 text-muted hover:bg-ink/5 hover:text-ink"
                 >
                   <X className="size-4" />
@@ -653,9 +730,9 @@ export default function RoleLoginPage({
                 </p>
                 <div className="rounded-xl border border-cyan/20 bg-cyan/5 p-3.5 text-ink">
                   <p className="font-semibold text-xs">{text.support}</p>
-                  <p className="mt-1 text-[11px] text-muted">{text.advisorIdShort} <strong className="text-ink">7</strong> (FinTax Consulting)</p>
+                  {clientPortal && <p className="mt-1 text-[11px] text-muted">{text.advisorIdShort} <strong className="text-ink">7</strong> (FinTax Consulting)</p>}
                   <p className="text-[11px] text-muted">{text.supportContact} <a href="mailto:support@fintax.demo" className="text-cyan underline">support@fintax.demo</a></p>
-                  <p className="text-[11px] text-muted mt-1">{text.demoLogin} <strong>7 · clientdemo · client123</strong></p>
+                  <p className="text-[11px] text-muted mt-1">{text.demoLogin} <strong>{demoCredentials}</strong></p>
                   <p className="mt-1 text-[11px] text-muted">{text.emailHelp}</p>
                 </div>
               </div>
@@ -665,9 +742,8 @@ export default function RoleLoginPage({
                 </Button>
               </div>
             </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+          </motion.div>
+      )}
     </main>
   );
 }

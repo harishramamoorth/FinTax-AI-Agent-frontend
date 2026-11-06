@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { sampleFields, type DemoDocument } from '../features/fintax/shared/demoWorkflow';
 import { createMonthlyPeriod } from '../features/fintax/shared/storage/periods';
 import type { MonthAnalysis } from '../features/fintax/shared/storage/models';
+import { documentsVisibleTo } from '../features/fintax/shared/storage/selectors';
 import { useDemoDocumentsStore } from './demoDocumentsStore';
 
 const makeDocument = (): DemoDocument => ({
@@ -279,6 +280,36 @@ describe('shared demo document store', () => {
     expect(useDemoDocumentsStore.getState().documents[0].assignedStaffId).toBe('staff-demo');
     expect(useDemoDocumentsStore.getState().documents[0].reviewHistory).toHaveLength(historyLength);
     expect(useDemoDocumentsStore.getState().auditEvents).toHaveLength(auditLength);
+  });
+
+  it('routes a client upload from the admin queue to only its assigned staff member', () => {
+    const document = { ...makeDocument(), id: 'CLIENT-ROUTED01', clientId: 'client@fintax.demo', clientSaved: true };
+    useDemoDocumentsStore.setState({
+      roleAssignments: [
+        ...useDemoDocumentsStore.getState().roleAssignments,
+        { id: 'staff-taylor', name: 'Taylor Staff', email: 'taylor@fintax.demo', role: 'staff' },
+      ],
+    });
+    useDemoDocumentsStore.getState().addDocument(document, document.clientId);
+
+    expect(documentsVisibleTo(useDemoDocumentsStore.getState().documents, 'client', document.clientId)).toContainEqual(document);
+    expect(documentsVisibleTo(useDemoDocumentsStore.getState().documents, 'admin', 'Alex Morgan')).toContainEqual(document);
+
+    useDemoDocumentsStore.getState().updateDocument(document.id, { assignedStaffId: 'staff-taylor' }, 'Alex Morgan');
+    const routedDocuments = useDemoDocumentsStore.getState().documents;
+
+    expect(documentsVisibleTo(routedDocuments, 'client', document.clientId)).toContainEqual(
+      expect.objectContaining({ id: document.id, assignedStaffId: 'staff-taylor' }),
+    );
+    expect(documentsVisibleTo(routedDocuments, 'admin', 'Alex Morgan')).toContainEqual(
+      expect.objectContaining({ id: document.id, assignedStaffId: 'staff-taylor' }),
+    );
+    expect(documentsVisibleTo(routedDocuments, 'staff', 'staff-taylor', 'Taylor Staff')).toContainEqual(
+      expect.objectContaining({ id: document.id, assignedStaffId: 'staff-taylor' }),
+    );
+    expect(documentsVisibleTo(routedDocuments, 'staff', 'staff-demo', 'Lena M.')).not.toContainEqual(
+      expect.objectContaining({ id: document.id }),
+    );
   });
 
   it('manages session-only demo profiles without treating them as authenticated accounts', () => {

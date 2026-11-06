@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { useSearchParams } from 'react-router-dom';
 import { createPortal } from 'react-dom';
@@ -100,10 +100,11 @@ const formatAmount = (value: string) => Number(value || 0).toLocaleString('de-DE
 
 export default function TeamWorkspace({ role, userName, onSignOut }: { role: DemoRole; userName: string; onSignOut: () => void }) {
   const roleLabel = role === 'admin' ? 'Admin' : 'Staff';
-  const [screen, setScreen] = useState<Screen>(role === 'admin' ? 'overview' : 'uploads');
+  const [screen, setScreen] = useState<Screen>('overview');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [adminSidebarCollapsed, setAdminSidebarCollapsed] = useState(false);
   const reduce = useReducedMotion();
+  const workspaceRef = useRef<HTMLDivElement>(null);
   const allDocuments = useDemoDocumentsStore((state) => state.documents);
   const staffProfile = useDemoDocumentsStore((state) => state.roleAssignments.find((assignment) => assignment.role === 'staff' && (assignment.name === userName || assignment.loginName === userName)));
   const sharedDocuments = useMemo(() => documentsVisibleTo(
@@ -160,11 +161,15 @@ export default function TeamWorkspace({ role, userName, onSignOut }: { role: Dem
       if (disposed) return;
       const current = useDemoDocumentsStore.getState();
       if (current.storageError) setNotice(`Shared browser storage could not be loaded: ${current.storageError}`);
-      stopSync = startSharedStorageSync(role === 'admin' ? (document) => {
+      stopSync = startSharedStorageSync((document) => {
+        const actorId = role === 'staff' ? staffProfile?.id ?? userName : userName;
+        if (role === 'staff' && !documentsVisibleTo([document], 'staff', actorId, userName).length) return;
         const client = demoClientIdentityById(document.clientId);
         setSelectedId(document.id);
-        setNotice(`New client upload: ${client?.name ?? 'Unknown client'} · ${document.name}`);
-      } : undefined);
+        setNotice(role === 'admin'
+          ? `Client workflow updated: ${client?.name ?? 'Unknown client'} · ${document.name}`
+          : `Client workflow update: ${client?.name ?? 'your assigned client'} · ${document.name} · ${document.status.replace(/_/g, ' ')}.`);
+      });
       const existing = new Set(current.documents.map((document) => document.id));
       SAMPLE_DOCUMENTS.filter((document) => !existing.has(document.id))
         .forEach((document) => addSharedDocument(document, 'Fictional sample data'));
@@ -189,7 +194,7 @@ export default function TeamWorkspace({ role, userName, onSignOut }: { role: Dem
       disposed = true;
       stopSync?.();
     };
-  }, [addFollowUpTask, addSharedDocument, hydrateSharedStorage, role, startSharedStorageSync]);
+  }, [addFollowUpTask, addSharedDocument, hydrateSharedStorage, role, staffProfile?.id, startSharedStorageSync, userName]);
 
   useEffect(() => {
     if (!notice) return;
@@ -203,7 +208,6 @@ export default function TeamWorkspace({ role, userName, onSignOut }: { role: Dem
     .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
   const openClientQuestions = assistantQuestions.filter((question) => question.replies.length === 0).length;
   const approvedCount = documents.filter((item) => item.status === 'approved').length;
-  const attentionCount = documents.filter((item) => ['action_required', 'needs_information', 'password_required', 'rejected'].includes(item.status)).length;
   const filteredDocuments = useMemo(() => documents.filter((item) => {
     const query = search.trim().toLowerCase();
     const client = demoClientIdentityById(item.clientId);
@@ -214,6 +218,16 @@ export default function TeamWorkspace({ role, userName, onSignOut }: { role: Dem
     if (nextScreen === 'review') setSelectedId(reviewDocuments[0]?.id ?? '');
     setScreen(nextScreen);
   };
+
+  useLayoutEffect(() => {
+    const scrollToTop = () => {
+      workspaceRef.current?.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+    };
+    scrollToTop();
+    const frame = window.requestAnimationFrame(scrollToTop);
+    return () => window.cancelAnimationFrame(frame);
+  }, [screen]);
+
   const openDocumentReview = (document: DemoDocument) => {
     setSelectedId(document.id);
     setScreen('review');
@@ -490,6 +504,7 @@ export default function TeamWorkspace({ role, userName, onSignOut }: { role: Dem
 
   return (
     <div
+      ref={workspaceRef}
       data-theme={role === 'admin' ? 'light' : undefined}
       className={`h-screen h-dvh overflow-x-hidden overflow-y-auto bg-bg text-ink ${role === 'admin' && screen === 'overview' ? 'admin-mobile-overview-shell' : ''}`}
       style={role === 'admin' ? { background: 'radial-gradient(1100px 520px at 50% -8%, #ffffff 0%, rgba(255,255,255,0) 70%), linear-gradient(#e8eef8, #eef2f9)' } : undefined}
@@ -524,22 +539,14 @@ export default function TeamWorkspace({ role, userName, onSignOut }: { role: Dem
             onSignOut={onSignOut}
           />
         ) : (
-          <aside id="demo-navigation" className="hidden h-fit rounded-xl border hairline bg-bg2/50 p-2 lg:sticky lg:top-[88px] lg:block">
-            <p className="px-3 pb-2 pt-2 text-[10px] font-semibold uppercase tracking-[.16em] text-muted">Workspace</p>
-            <nav aria-label="Demo workspace" className="grid grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-1">
-              {NAV.filter((item) => item.group === 'workspace').map((item) => <NavButton key={item.id} item={item} active={screen === item.id} onClick={() => navigateTo(item.id)} count={item.id === 'review' ? reviewDocuments.length : item.id === 'uploads' ? documents.filter((document) => !document.sample && Boolean(document.clientId)).length : undefined} />)}
-            </nav>
-            <details className="mt-4 border-t hairline pt-3">
-              <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 rounded-lg px-3 text-xs font-medium text-muted hover:bg-ink/5 [&::-webkit-details-marker]:hidden"><Settings2 className="size-4" />More workspace tools<ChevronRight className="ml-auto size-3.5" /></summary>
-              <nav aria-label="Manage demo workspace" className="mt-1 grid grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-1">
-                {NAV.filter((item) => item.group === 'manage' && item.id !== 'admin').map((item) => <NavButton key={item.id} item={item} active={screen === item.id} onClick={() => navigateTo(item.id)} count={item.id === 'correspondence' ? openClientQuestions : undefined} />)}
-              </nav>
-            </details>
-            <div className="mt-5 rounded-lg border border-cyan/15 bg-cyan/5 p-3">
-              <div className="flex items-center gap-2 text-xs font-semibold"><LockKeyhole className="size-3.5 text-cyan" />Private demo mode</div>
-              <p className="mt-1.5 text-[11px] leading-4 text-muted">Monthly documents and periods persist in this browser’s IndexedDB. Other workspace actions remain session-only; nothing is sent to a server.</p>
-            </div>
-          </aside>
+          <StaffSidebar
+            screen={screen}
+            userName={userName}
+            reviewCount={reviewDocuments.length}
+            uploadCount={documents.filter((document) => !document.sample && Boolean(document.clientId)).length}
+            questionCount={openClientQuestions}
+            onNavigate={navigateTo}
+          />
         )}
 
         <main className={`min-w-0 space-y-5 ${screen === 'exports' ? 'pb-[calc(10rem+env(safe-area-inset-bottom))]' : 'pb-[calc(6rem+env(safe-area-inset-bottom))]'} sm:space-y-6 lg:pb-12 ${role === 'admin' && screen === 'overview' ? 'admin-mobile-overview-main' : ''}`}>
@@ -551,7 +558,7 @@ export default function TeamWorkspace({ role, userName, onSignOut }: { role: Dem
           {notice && <div role="status" className="demo-enter flex items-start gap-2 rounded-lg border border-cyan/20 bg-cyan/5 px-3 py-2.5 text-sm"><CheckCircle2 className="mt-0.5 size-4 shrink-0 text-cyan" /><span className="min-w-0 flex-1">{notice}</span><button type="button" aria-label="Dismiss notice" onClick={() => setNotice('')}><X className="size-4 text-muted" /></button></div>}
 
           <motion.div key={screen} className="space-y-5 sm:space-y-6" initial={reduce ? false : { opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
-          {screen === 'overview' && <Overview role={role === 'admin' ? 'admin' : 'staff'} userName={userName} documents={documents} tasks={followUpTasks} roleAssignments={roleAssignments} reviewCount={reviewDocuments.length} approvedCount={approvedCount} attentionCount={attentionCount} openQuestions={openClientQuestions} onNavigate={navigateTo} onOpenDocument={(item) => { setSelectedId(item.id); setScreen('review'); }} />}
+          {screen === 'overview' && <Overview role={role === 'admin' ? 'admin' : 'staff'} userName={userName} documents={documents} tasks={followUpTasks} questions={assistantQuestions} roleAssignments={roleAssignments} reviewCount={reviewDocuments.length} reviewDocuments={reviewDocuments} approvedCount={approvedCount} openQuestions={openClientQuestions} onNavigate={navigateTo} onOpenDocument={(item) => { setSelectedId(item.id); setScreen('review'); }} />}
           {screen === 'documents' && <DocumentsPanel
             adminStyle={role === 'admin'}
             documents={filteredDocuments} search={search} onSearch={setSearch} onDrop={handleDrop}
@@ -646,12 +653,26 @@ export default function TeamWorkspace({ role, userName, onSignOut }: { role: Dem
         items={NAV.filter((item) => role === 'admin' || item.id !== 'admin')}
         screen={screen}
         onSelect={(id) => { navigateTo(id); setDrawerOpen(false); }}
-        counts={{ review: reviewDocuments.length, uploads: documents.filter((document) => !document.sample && Boolean(document.clientId)).length }}
+        counts={{
+          review: reviewDocuments.length,
+          uploads: documents.filter((document) => !document.sample && Boolean(document.clientId)).length,
+          tasks: followUpTasks.filter((task) => task.owner === userName && task.status === 'open').length,
+        }}
         userName={userName}
         roleLabel={roleLabel}
         onSignOut={onSignOut}
       />
-      <BottomBar role={role === 'admin' ? 'admin' : 'staff'} screen={screen} onSelect={navigateTo} reviewCount={reviewDocuments.length} onMore={() => setDrawerOpen(true)} />
+      <BottomBar
+        role={role === 'admin' ? 'admin' : 'staff'}
+        screen={screen}
+        onSelect={navigateTo}
+        reviewCount={reviewDocuments.length}
+        uploadCount={documents.filter((document) => !document.sample && Boolean(document.clientId)).length}
+        taskCount={followUpTasks.filter((task) => task.owner === userName && task.status === 'open').length}
+        onMore={() => setDrawerOpen(true)}
+        moreActive={!['overview', 'uploads', 'review', role === 'admin' ? 'clients' : 'tasks'].includes(screen)}
+        moreExpanded={drawerOpen}
+      />
       {passwordDialog && <div className="fixed inset-0 z-[90] grid place-items-center bg-ink/45 p-4">
         <form role="dialog" aria-modal="true" aria-labelledby="team-pdf-password-heading" className="w-full max-w-md rounded-3xl bg-white p-5 shadow-2xl sm:p-6"
           onSubmit={(event) => {
@@ -682,11 +703,96 @@ export default function TeamWorkspace({ role, userName, onSignOut }: { role: Dem
   );
 }
 
-function NavButton({ item, active, onClick, count }: { item: typeof NAV[number]; active: boolean; onClick: () => void; count?: number }) {
-  const Icon = item.icon;
-  return <button type="button" onClick={onClick} aria-current={active ? 'page' : undefined} className={`flex min-w-0 items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-xs transition-colors lg:text-[13px] ${active ? 'bg-cyan/10 text-ink ring-1 ring-cyan/20' : 'text-muted hover:bg-ink/5 hover:text-ink'}`}>
-    <Icon className={`size-4 shrink-0 ${active ? 'text-cyan' : ''}`} /><span className="truncate">{item.label}</span>{count ? <span className="ml-auto rounded-full bg-warn/15 px-1.5 text-[10px] text-warn">{count}</span> : null}
-  </button>;
+function StaffSidebar({ screen, userName, reviewCount, uploadCount, questionCount, onNavigate }: {
+  screen: Screen;
+  userName: string;
+  reviewCount: number;
+  uploadCount: number;
+  questionCount: number;
+  onNavigate: (screen: Screen) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [manageExpanded, setManageExpanded] = useState(false);
+  const normalizedQuery = query.trim().toLowerCase();
+  const matches = (item: typeof NAV[number]) => !normalizedQuery || item.label.toLowerCase().includes(normalizedQuery);
+  const primaryItems = NAV.filter((item) => ['overview', 'uploads', 'review', 'tasks'].includes(item.id) && matches(item));
+  const manageItems = NAV.filter((item) => item.group === 'manage' && item.id !== 'admin' && matches(item));
+  const inboxItem = NAV.find((item) => item.id === 'correspondence');
+  const showInbox = Boolean(inboxItem && matches(inboxItem));
+
+  const renderItem = (item: typeof NAV[number]) => {
+    const Icon = item.icon;
+    const active = screen === item.id;
+    const count = item.id === 'review' ? reviewCount
+      : item.id === 'uploads' ? uploadCount
+        : item.id === 'correspondence' ? questionCount : 0;
+    return (
+      <button
+        key={item.id}
+        type="button"
+        onClick={() => onNavigate(item.id)}
+        aria-current={active ? 'page' : undefined}
+        className={`group flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-[13px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan ${active ? 'bg-cyan/10 font-semibold text-ink' : 'text-muted hover:bg-ink/5 hover:text-ink'}`}
+      >
+        <Icon className={`size-[17px] shrink-0 ${active ? 'text-cyan' : 'text-muted group-hover:text-ink'}`} />
+        <span className="min-w-0 flex-1 truncate">{item.id === 'overview' ? 'Dashboard' : item.id === 'uploads' ? 'Client inbox' : item.id === 'review' ? 'Review queue' : item.label}</span>
+        {count > 0 && <span className={`grid min-w-5 place-items-center rounded-md px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${active ? 'bg-cyan/15 text-cyan' : 'bg-slate-100 text-slate-600'}`}>{count}</span>}
+        {active && <span className="size-1.5 shrink-0 rounded-full bg-cyan" />}
+      </button>
+    );
+  };
+
+  return (
+    <aside id="demo-navigation" className="sticky top-[88px] hidden h-[calc(100dvh-112px)] min-h-[480px] flex-col rounded-2xl border border-slate-200/80 bg-white p-3 shadow-[0_16px_40px_-32px_rgba(15,23,42,.35)] lg:flex">
+      <div className="flex items-center gap-2 border-b border-slate-100 px-1 pb-3">
+        <img src={fintaxLogo} alt="FinTax Consulting" className="h-auto w-[104px] shrink-0 object-contain" />
+        <span className="ml-auto rounded-full bg-cyan/8 px-2 py-1 text-[9px] font-semibold uppercase tracking-wide text-cyan">Staff</span>
+      </div>
+
+      <label className="mt-3 flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 text-slate-400 transition focus-within:border-cyan/40 focus-within:bg-white focus-within:ring-2 focus-within:ring-cyan/10">
+        <Search className="size-4 shrink-0" />
+        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search pages" aria-label="Search staff pages" className="min-w-0 flex-1 bg-transparent text-xs text-ink outline-none placeholder:text-muted" />
+        {query && <button type="button" onClick={() => setQuery('')} aria-label="Clear search" className="rounded px-1 text-[10px] text-muted hover:bg-ink/5 hover:text-ink">Clear</button>}
+      </label>
+
+      <div className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto pe-0.5">
+        <section>
+          <h2 className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[.14em] text-slate-400">Workspace</h2>
+          <nav aria-label="Staff workspace" className="grid gap-1">{primaryItems.map(renderItem)}</nav>
+          {normalizedQuery && primaryItems.length === 0 && manageItems.length === 0 && !showInbox && <p className="px-3 py-3 text-xs text-muted">No pages match “{query}”.</p>}
+        </section>
+
+        {(manageItems.length > 0 || !normalizedQuery) && (
+          <details
+            className="group border-t border-slate-100 pt-3"
+            open={manageExpanded || Boolean(normalizedQuery) || manageItems.some((item) => item.id === screen)}
+            onToggle={(event) => setManageExpanded(event.currentTarget.open)}
+          >
+            <summary className="flex min-h-10 cursor-pointer list-none items-center gap-3 rounded-xl px-3 text-[13px] font-medium text-slate-600 transition hover:bg-slate-50 hover:text-ink [&::-webkit-details-marker]:hidden">
+              <Settings2 className="size-[17px] shrink-0" />
+              <span className="flex-1">More tools</span>
+              <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
+            </summary>
+            <nav aria-label="More staff tools" className="mt-1 grid gap-1">{manageItems.map(renderItem)}</nav>
+          </details>
+        )}
+      </div>
+
+      {showInbox && (
+        <div className="border-t border-slate-100 pt-3">
+          {inboxItem && renderItem(inboxItem)}
+        </div>
+      )}
+      <div className="mt-2 flex items-center gap-2.5 rounded-xl border border-slate-100 bg-slate-50/80 p-2.5">
+        <span className="grid size-9 shrink-0 place-items-center rounded-full bg-cyan/10 text-xs font-bold text-cyan">{userName.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase()}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-xs font-semibold text-ink">{userName}</span>
+          <span className="block text-[10px] text-muted">Staff workspace</span>
+        </span>
+        <LockKeyhole className="size-3.5 shrink-0 text-slate-400" aria-label="Private demo workspace" />
+      </div>
+    </aside>
+  );
 }
 
 function AdminSidebar({ screen, userName, reviewCount, questionCount, collapsed, onToggleCollapsed, onNavigate, onSignOut }: {
@@ -797,20 +903,33 @@ function AdminSidebar({ screen, userName, reviewCount, questionCount, collapsed,
   );
 }
 
-function Overview({ role, userName, documents, tasks, roleAssignments, reviewCount, approvedCount, attentionCount, openQuestions, onNavigate, onOpenDocument }: { role: Exclude<DemoRole, 'client'>; userName: string; documents: DemoDocument[]; tasks: DemoFollowUpTask[]; roleAssignments: DemoRoleAssignment[]; reviewCount: number; approvedCount: number; attentionCount: number; openQuestions: number; onNavigate: (screen: Screen) => void; onOpenDocument: (document: DemoDocument) => void }) {
+function Overview({ role, userName, documents, tasks, questions, roleAssignments, reviewCount, reviewDocuments, approvedCount, openQuestions, onNavigate, onOpenDocument }: { role: Exclude<DemoRole, 'client'>; userName: string; documents: DemoDocument[]; tasks: DemoFollowUpTask[]; questions: ClientAssistantQuestion[]; roleAssignments: DemoRoleAssignment[]; reviewCount: number; reviewDocuments: DemoDocument[]; approvedCount: number; openQuestions: number; onNavigate: (screen: Screen) => void; onOpenDocument: (document: DemoDocument) => void }) {
   const [adminPanel, setAdminPanel] = useState<'summary' | 'workflow' | 'clients' | 'recent'>('summary');
   const recent = documents.slice(0, 4);
+  const staffDocuments = documents.filter((document) => !document.sample);
+  const staffTasks = tasks
+    .filter((task) => task.owner === userName && task.status === 'open')
+    .sort((left, right) => left.dueDate.localeCompare(right.dueDate));
+  const staffClientIds = new Set(documents.map((document) => document.clientId).filter((clientId): clientId is string => Boolean(clientId)));
+  const staffQuestions = questions.filter((question) =>
+    question.replies.length === 0 && (role === 'admin' || staffClientIds.has(question.clientId)),
+  );
+  const visibleQuestionCount = role === 'admin' ? openQuestions : staffQuestions.length;
+  const prioritizedReviews = [...reviewDocuments]
+    .sort((left, right) => {
+      const priority = (document: DemoDocument) => ['action_required', 'password_required', 'needs_information', 'rejected'].includes(document.status) ? 0
+        : document.status === 'review' ? 1 : 2;
+      return priority(left) - priority(right) || Date.parse(right.createdAt) - Date.parse(left.createdAt);
+    })
+    .slice(0, 3);
+  const workflowDocuments = role === 'admin' ? documents : staffDocuments;
   const clientCounts = DEMO_CLIENTS.map((client) => ({
     ...client,
     count: documents.filter((document) => document.clientId === client.email).length,
     open: documents.filter((document) => document.clientId === client.email && ['review', 'action_required', 'needs_information', 'password_required', 'rejected'].includes(document.status)).length,
   }));
-  const upcomingTasks = tasks.filter((task) => {
-    const daysUntilDue = (Date.parse(`${task.dueDate}T23:59:59`) - Date.now()) / 86_400_000;
-    return task.owner === userName && task.status === 'open' && daysUntilDue >= 0 && daysUntilDue <= 7;
-  }).length;
-  const processingCount = documents.filter((document) => document.status === 'processing').length;
-  const exportReadyCount = documents.filter((document) => document.status === 'approved'
+  const processingCount = (role === 'admin' ? documents : staffDocuments).filter((document) => document.status === 'processing').length;
+  const exportReadyCount = (role === 'admin' ? documents : staffDocuments).filter((document) => document.status === 'approved'
     && ['bank_statement', 'purchase_invoice', 'sales_invoice', 'receipt', 'cash_book'].includes(document.category)).length;
   const stats = role === 'admin' ? [
     { label: 'Demo clients', value: clientCounts.length, note: 'Fictional client workspaces', icon: Users, color: 'text-cyan', action: 'clients' as Screen, actionLabel: 'Open clients' },
@@ -820,14 +939,15 @@ function Overview({ role, userName, documents, tasks, roleAssignments, reviewCou
     { label: 'In processing', value: processingCount, note: 'OCR and intake work', icon: Clock3, color: 'text-violet', action: 'documents' as Screen, actionLabel: 'Track intake' },
     { label: 'Completed', value: approvedCount, note: 'Approved demo records', icon: BadgeCheck, color: 'text-green', action: 'exports' as Screen, actionLabel: 'Open exports' },
   ] : [
-    { label: 'Assigned documents', value: documents.length, note: 'Visible in your demo queue', icon: FileText, color: 'text-cyan', action: 'documents' as Screen, actionLabel: 'Open assignments' },
-    { label: 'Pending reviews', value: documents.filter((document) => document.status === 'review').length, note: 'Waiting for review', icon: FileClock, color: 'text-warn', action: 'review' as Screen, actionLabel: 'Review documents' },
-    { label: 'In progress', value: processingCount, note: 'Being processed', icon: Clock3, color: 'text-violet', action: 'documents' as Screen, actionLabel: 'Open documents' },
-    { label: 'Completed', value: approvedCount, note: 'Approved demo records', icon: BadgeCheck, color: 'text-green', action: 'exports' as Screen, actionLabel: 'Open exports' },
-    { label: 'Recently updated', value: documents.filter((document) => {
+    { label: 'Assigned documents', compactLabel: 'Assigned', value: staffDocuments.length, note: 'Live client uploads', icon: FileText, color: 'text-cyan', action: 'uploads' as Screen, actionLabel: 'Open assignments' },
+    { label: 'Pending reviews', compactLabel: 'Reviews', value: reviewDocuments.filter((document) => document.status === 'review').length, note: 'Waiting for review', icon: FileClock, color: 'text-warn', action: 'review' as Screen, actionLabel: 'Review documents' },
+    { label: 'In progress', compactLabel: 'Processing', value: processingCount, note: 'Being processed', icon: Clock3, color: 'text-violet', action: 'documents' as Screen, actionLabel: 'Open documents' },
+    { label: 'Completed', compactLabel: 'Completed', value: staffDocuments.filter((document) => document.status === 'approved').length, note: 'Approved client records', icon: BadgeCheck, color: 'text-green', action: 'exports' as Screen, actionLabel: 'Open exports' },
+    { label: 'Open follow-ups', compactLabel: 'Follow-ups', value: staffTasks.length, note: 'Includes overdue tasks', icon: CircleAlert, color: 'text-cyan', action: 'tasks' as Screen, actionLabel: 'See follow-ups' },
+    { label: 'Recently updated', value: staffDocuments.filter((document) => {
       const age = Date.now() - Date.parse(document.updatedAt ?? document.createdAt);
       return age >= 0 && age <= 7 * 86_400_000;
-    }).length, note: 'Updated in the last 7 days', icon: CircleAlert, color: 'text-cyan', action: 'documents' as Screen, actionLabel: 'See recent updates' },
+    }).length, compactLabel: 'Updated', note: 'Updated in the last 7 days', icon: CircleAlert, color: 'text-cyan', action: 'documents' as Screen, actionLabel: 'See recent updates' },
   ];
   return <>
     {role === 'admin' && (
@@ -869,7 +989,7 @@ function Overview({ role, userName, documents, tasks, roleAssignments, reviewCou
         items={stats.map((stat, index) => ({
           key: String(index),
           label: stat.label,
-          compactLabel: stat.label,
+          compactLabel: 'compactLabel' in stat ? stat.compactLabel : stat.label,
           hint: stat.note,
           value: <CountUp value={stat.value} />,
           icon: stat.icon,
@@ -881,18 +1001,18 @@ function Overview({ role, userName, documents, tasks, roleAssignments, reviewCou
       />
     </section>
 
-    <div className={`grid gap-5 ${role === 'admin' ? 'xl:grid-cols-[minmax(0,1.3fr)_minmax(280px,.7fr)]' : ''}`}>
-      <div className={role === 'admin' ? `admin-mobile-overview-panel admin-mobile-workflow ${adminPanel === 'workflow' ? 'is-selected' : ''}` : ''}>
-      <Panel className={role === 'admin' ? 'admin-mobile-workflow-card overflow-hidden !rounded-3xl !border-white/80 !bg-white/80 shadow-[0_24px_60px_-34px_rgba(60,80,140,.35)] backdrop-blur' : 'staff-workflow-panel overflow-hidden'}>
-        <div className={`staff-workflow-heading flex items-center justify-between border-b hairline ${role === 'admin' ? 'px-5 py-4' : ''}`}><div><h2 className="font-semibold">Document workflow</h2><p className="mt-1 text-xs text-muted">Monthly client files move from upload to accounting export. Counts include samples and browser uploads.</p></div></div>
+    <div className={`grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 ${role === 'admin' ? 'xl:grid-cols-[minmax(0,1.3fr)_minmax(280px,.7fr)]' : ''}`}>
+      <div className={role === 'admin' ? `admin-mobile-overview-panel admin-mobile-workflow ${adminPanel === 'workflow' ? 'is-selected' : ''}` : 'order-2 min-w-0'}>
+      <Panel className={role === 'admin' ? 'admin-mobile-workflow-card overflow-hidden !rounded-3xl !border-white/80 !bg-white/80 shadow-[0_24px_60px_-34px_rgba(60,80,140,.35)] backdrop-blur' : 'staff-workflow-panel overflow-hidden !rounded-3xl !border-slate-200 !bg-white shadow-sm'}>
+        <div className={`staff-workflow-heading flex items-center justify-between border-b hairline ${role === 'admin' ? 'px-5 py-4' : ''}`}><div><h2 className="font-semibold">Document workflow</h2><p className="mt-1 text-xs text-muted">{role === 'admin' ? 'Client files move from upload through staff review to accounting export. Counts include samples and browser uploads.' : 'Tap a step to open its queue. Track client files from intake through review and export.'}</p></div></div>
         {role === 'admin' ? (
           <div className="p-2 sm:p-4">
             <FlowDiagram
               counts={{
-                upload: documents.filter((document) => Boolean(document.clientId)).length,
+                upload: workflowDocuments.filter((document) => Boolean(document.clientId)).length,
                 extract: processingCount,
-                validate: documents.filter((document) => ['action_required', 'needs_information', 'password_required', 'rejected'].includes(document.status)).length,
-                review: documents.filter((document) => document.status === 'review').length,
+                validate: workflowDocuments.filter((document) => ['action_required', 'needs_information', 'password_required', 'rejected'].includes(document.status)).length,
+                review: workflowDocuments.filter((document) => document.status === 'review').length,
                 export: exportReadyCount,
               }}
               onNavigate={onNavigate}
@@ -901,10 +1021,10 @@ function Overview({ role, userName, documents, tasks, roleAssignments, reviewCou
         ) : (
           <StaffWorkflow
             counts={{
-              upload: documents.filter((document) => Boolean(document.clientId)).length,
+              upload: workflowDocuments.filter((document) => Boolean(document.clientId)).length,
               extract: processingCount,
-              validate: documents.filter((document) => ['action_required', 'needs_information', 'password_required', 'rejected'].includes(document.status)).length,
-              review: documents.filter((document) => document.status === 'review').length,
+              validate: workflowDocuments.filter((document) => ['action_required', 'needs_information', 'password_required', 'rejected'].includes(document.status)).length,
+              review: workflowDocuments.filter((document) => document.status === 'review').length,
               export: exportReadyCount,
             }}
             reviewCount={reviewCount}
@@ -917,16 +1037,38 @@ function Overview({ role, userName, documents, tasks, roleAssignments, reviewCou
         <div className="border-b hairline px-5 py-4"><p className="text-[11px] font-medium uppercase tracking-wide text-cyan">System overview</p><h2 className="mt-1 font-semibold">Client portfolio</h2><p className="mt-1 text-xs text-muted">Current workflow status across fictional demo accounts.</p></div>
         <ul className="divide-y divide-line/10">{clientCounts.map((client) => <li key={client.id} className="flex items-center gap-3 px-5 py-3"><span className="grid size-8 place-items-center rounded-lg bg-cyan/8 text-cyan"><Building2 className="size-4" /></span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium">{client.company}</span><span className="block text-[11px] text-muted">{client.count} documents · {client.open} open items</span></span><Badge tone={client.open ? 'warn' : 'ok'}>{client.open ? 'In progress' : 'Clear'}</Badge></li>)}</ul>
         <button type="button" onClick={() => onNavigate('clients')} className="w-full border-t hairline px-5 py-3 text-left text-xs font-medium text-cyan hover:bg-cyan/5">Open client management <ArrowRight className="ml-1 inline size-3.5" /></button>
-      </Panel></div> : <Panel className="p-5">
-        <div className="flex items-center gap-2"><ClipboardCheck className="size-4 text-cyan" /><h2 className="font-semibold">My operations queue</h2></div>
-        <p className="mt-1 text-xs text-muted">{userName} · permitted demo client assignments</p>
-        <div className="mt-4 space-y-2">{[
-          { label: 'Documents to review', value: reviewCount, screen: 'review' as Screen },
-          { label: 'Client questions', value: openQuestions, screen: 'correspondence' as Screen },
-          { label: 'Upcoming client tasks', value: upcomingTasks, screen: 'tasks' as Screen },
-        ].map((item) => <button key={item.label} type="button" onClick={() => onNavigate(item.screen)} className="flex w-full items-center justify-between rounded-lg border hairline px-3 py-2.5 text-left text-xs hover:border-cyan/35 hover:bg-cyan/5"><span>{item.label}</span><span className="font-semibold tabular-nums">{item.value}<ChevronRight className="ml-2 inline size-3.5 text-muted" /></span></button>)}</div>
-        <div className="mt-4 border-t hairline pt-3"><p className="text-[11px] font-medium">Assigned demo clients</p><ul className="mt-2 space-y-2">{clientCounts.map((client) => <li key={client.id} className="flex items-center justify-between gap-2 text-[11px]"><span className="truncate">{client.company}</span><span className="shrink-0 text-muted">{client.open} open</span></li>)}</ul></div>
-        <div className="mt-4 rounded-lg bg-bg2/70 p-3"><p className="text-[11px] font-medium">Demo processing limits</p><p className="mt-1 text-[11px] leading-4 text-muted">Documents and monthly periods use browser IndexedDB. PDF text and supported scanned pages are processed locally; OCR needs manual verification and no connected AI is configured.</p></div>
+      </Panel></div> : <Panel className="order-1 p-5">
+        <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2"><ClipboardCheck className="size-4 text-cyan" /><h2 className="font-semibold">My next actions</h2></div><Badge tone={prioritizedReviews.length + staffTasks.length + staffQuestions.length ? 'warn' : 'ok'}>{prioritizedReviews.length + staffTasks.length + staffQuestions.length} open</Badge></div>
+        <p className="mt-1 text-xs text-muted">Your review queue, client replies, and follow-ups in one place.</p>
+        <div className="mt-4 space-y-2">
+          {prioritizedReviews.map((item) => {
+            const client = demoClientIdentityById(item.clientId);
+            return <button key={item.id} type="button" onClick={() => onOpenDocument(item)} className="flex min-h-14 w-full items-center gap-3 rounded-xl border hairline px-3 py-2 text-left hover:border-cyan/35 hover:bg-cyan/5">
+              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-warn/10 text-warn"><FileClock className="size-4" /></span>
+              <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium">{item.name}</span><span className="mt-0.5 block truncate text-[11px] text-muted">{client?.name ?? 'Client document'} · {screenTitle('review')}</span></span>
+              <ChevronRight className="size-4 shrink-0 text-muted" />
+            </button>;
+          })}
+          {staffQuestions.slice(0, 2).map((question) => <button key={question.id} type="button" onClick={() => onNavigate('correspondence')} className="flex min-h-14 w-full items-center gap-3 rounded-xl border hairline px-3 py-2 text-left hover:border-cyan/35 hover:bg-cyan/5">
+            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-violet/10 text-violet"><MessageSquareText className="size-4" /></span>
+            <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium">{question.question}</span><span className="mt-0.5 block text-[11px] text-muted">Client question · reply needed</span></span>
+            <ChevronRight className="size-4 shrink-0 text-muted" />
+          </button>)}
+          {staffTasks.slice(0, 2).map((task) => {
+            const overdue = task.dueDate < new Date().toISOString().slice(0, 10);
+            return <button key={task.id} type="button" onClick={() => onNavigate('tasks')} className="flex min-h-14 w-full items-center gap-3 rounded-xl border hairline px-3 py-2 text-left hover:border-cyan/35 hover:bg-cyan/5">
+              <span className={`grid size-9 shrink-0 place-items-center rounded-lg ${overdue ? 'bg-bad/10 text-bad' : 'bg-cyan/10 text-cyan'}`}><CalendarDays className="size-4" /></span>
+              <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium">{task.title}</span><span className={`mt-0.5 block text-[11px] ${overdue ? 'text-bad' : 'text-muted'}`}>{overdue ? 'Overdue' : 'Due'} · {new Date(`${task.dueDate}T00:00:00`).toLocaleDateString()}</span></span>
+              <ChevronRight className="size-4 shrink-0 text-muted" />
+            </button>;
+          })}
+          {prioritizedReviews.length + staffQuestions.length + staffTasks.length === 0 && <div className="rounded-xl border border-dashed hairline px-4 py-5 text-center"><p className="text-sm font-medium">You’re all caught up</p><p className="mt-1 text-xs text-muted">New uploads, client replies, and follow-ups will appear here.</p><Button size="sm" className="mt-3" onClick={() => onNavigate('uploads')}>Open client uploads</Button></div>}
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2 border-t hairline pt-3">
+          <Button size="sm" variant="outline" onClick={() => onNavigate('review')}>Review queue ({reviewCount})</Button>
+          <Button size="sm" variant="outline" onClick={() => onNavigate('tasks')}>All follow-ups ({staffTasks.length})</Button>
+          <Button size="sm" variant="outline" onClick={() => onNavigate('correspondence')}>Client questions ({visibleQuestionCount})</Button>
+        </div>
       </Panel>}
     </div>
 
@@ -1654,7 +1796,7 @@ function ReviewPanel({ adminStyle, documents, selected, onSelect, onUpdate, onAp
           <Button className="min-h-11 w-full whitespace-normal py-2" icon={<MessageSquareText className="size-4 shrink-0" />} onClick={() => onRequestCorrection(current.id, requestReason)} disabled={!canTransitionDocumentStatus(current.status, current.clientId ? 'needs_information' : 'action_required')}>Request information / clearer file</Button>
           </div>
           {current.reviewHistory && current.reviewHistory.length > 0 && <details className="rounded-lg border hairline p-3"><summary className="cursor-pointer text-xs font-medium">Review history ({current.reviewHistory.length})</summary><ul className="mt-2 space-y-2 text-[10px] text-muted">{current.reviewHistory.map((event, index) => <li key={`${event.at}-${index}`}>{new Date(event.at).toLocaleString()} · {event.action}: {event.details}</li>)}</ul></details>}
-          <p className="text-center text-[10px] leading-4 text-muted">Approval only changes this in-memory demo record.</p>
+          <p className="text-center text-[10px] leading-4 text-muted">Approval is saved in this browser’s shared demo storage; clients see the update here, not in a server-wide inbox.</p>
         </aside>
       </div>
     </Panel> : queueDocuments.length > 0 ? <Panel className="grid min-h-32 place-items-center p-4 text-center sm:min-h-64 sm:p-6"><div><ClipboardCheck className="mx-auto size-7 text-muted" /><p className="mt-2 text-sm font-medium">Select a document to review</p><p className="mt-1 text-xs text-muted">Choose a document from the queue.</p></div></Panel> : null}
@@ -2182,7 +2324,7 @@ function screenTitle(screen: Screen) {
 }
 
 function screenDescription(screen: Screen, role: DemoRole) {
-  if (screen === 'overview' && role === 'staff') return 'Prioritize client questions, documents awaiting review, and upcoming work.';
+  if (screen === 'overview' && role === 'staff') return 'Start with your next actions, then follow client documents from inbox to review and export.';
   if (screen === 'overview' && role === 'admin') return 'Monitor demo-wide client activity, workflow status, and unresolved items.';
   const descriptions: Record<Screen, string> = {
     overview: 'A role-specific view of the FinTax demo workspace.',

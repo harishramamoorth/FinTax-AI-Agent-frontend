@@ -353,7 +353,10 @@ export const useDemoDocumentsStore = create<DemoDocumentsState>((set, get) => ({
   },
   startStorageSync: (onClientUpload) => createStorageChangeNotifier(() => {
     const previousSubmitted = new Set(get().periods.filter((period) => period.status === 'submitted').map((period) => period.id));
-    const previousDocumentIds = new Set(get().documents.map((document) => document.id));
+    const previousDocuments = new Map(get().documents.map((document) => [document.id, {
+      clientSaved: document.clientSaved,
+      assignedStaffId: document.assignedStaffId,
+    }]));
     void get().hydrateStorage().then(() => {
       const newSubmission = get().periods.find((period) => period.status === 'submitted' && !previousSubmitted.has(period.id));
       if (newSubmission) {
@@ -362,7 +365,13 @@ export const useDemoDocumentsStore = create<DemoDocumentsState>((set, get) => ({
       }
       if (onClientUpload) {
         get().documents
-          .filter((document) => !previousDocumentIds.has(document.id) && !document.sample && Boolean(document.clientId))
+          .filter((document) => {
+            if (document.sample || !document.clientId) return false;
+            const previous = previousDocuments.get(document.id);
+            return !previous
+              || (previous.clientSaved === false && document.clientSaved === true)
+              || previous.assignedStaffId !== document.assignedStaffId;
+          })
           .forEach(onClientUpload);
       }
     });
