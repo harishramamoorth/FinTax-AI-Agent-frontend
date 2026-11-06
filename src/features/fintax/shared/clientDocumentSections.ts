@@ -25,7 +25,7 @@ export const CLIENT_DOCUMENT_SECTIONS = [
   {
     id: 'client_correspondence',
     label: 'Correspondence',
-    description: 'Formerly “Other” · letters',
+    description: 'Letters from authorities, contracts, leases, and other documents',
     area: 'correspondence',
     categories: ['correspondence', 'other_correspondence', 'other'] as DemoCategory[],
   },

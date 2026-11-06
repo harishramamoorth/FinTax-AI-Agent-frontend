@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CLIENT_DEMO_DOCUMENTS } from '../clientDemoData';
 import { createMonthlyPeriod } from './periods';
-import { demoClientIdentityById, documentsVisibleTo, periodsVisibleTo } from './selectors';
+import { clientUploadsVisibleToStaff, demoClientIdentityById, documentsVisibleTo, periodsVisibleTo } from './selectors';
 
 describe('role-aware demo selectors', () => {
   it('limits client documents to the selected client and allows assigned staff or admin', () => {
@@ -17,8 +17,14 @@ describe('role-aware demo selectors', () => {
     expect(documentsVisibleTo([upload], 'client', 'client@fintax.demo')).toEqual([upload]);
     expect(documentsVisibleTo([upload], 'staff', 'Lena M.')).toEqual([]);
     expect(documentsVisibleTo([upload], 'admin', 'Admin Demo User')).toEqual([upload]);
-    expect(documentsVisibleTo([{ ...upload, assignedStaffId: 'staff-1' }], 'staff', 'staff-1', 'A different name')).toHaveLength(1);
+    expect(documentsVisibleTo([{ ...upload, assignedStaffId: 'staff-1' }], 'staff', 'staff-1', 'A different name')).toHaveLength(0);
+    expect(documentsVisibleTo([{ ...upload, clientSaved: true, assignedStaffId: 'lena-login' }], 'staff', 'staff-1', 'Lena M.', ['lena-login'])).toHaveLength(1);
     expect(documentsVisibleTo([{ ...upload, clientSaved: true }], 'staff', 'Lena M.')).toHaveLength(1);
+    expect(clientUploadsVisibleToStaff([upload], 'staff-demo', 'Lena M.')).toEqual([upload]);
+    expect(clientUploadsVisibleToStaff([{ ...upload, assignedStaffId: 'staff-1' }], 'staff-demo', 'Lena M.')).toHaveLength(0);
+    expect(clientUploadsVisibleToStaff([{ ...upload, assignedStaffId: 'staff-1' }], 'staff-1', 'Taylor Staff')).toHaveLength(1);
+    expect(clientUploadsVisibleToStaff([{ ...upload, assignedStaffId: 'lena-login' }], 'staff-1', 'Lena M.', ['lena-login'])).toHaveLength(1);
+    expect(clientUploadsVisibleToStaff([{ ...upload, clientSaved: true, assignedStaffId: 'staff-1' }], 'staff-1', 'Taylor Staff')).toHaveLength(1);
   });
 
   it('resolves a client identity from the uploader id', () => {

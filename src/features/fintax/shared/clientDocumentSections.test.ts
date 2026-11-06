@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { CLIENT_DEMO_DOCUMENTS } from './clientDemoData';
-import { documentsInClientSection } from './clientDocumentSections';
+import { CLIENT_DOCUMENT_SECTIONS, documentsInClientSection } from './clientDocumentSections';
 
 describe('client upload sections', () => {
+  it('describes the four client upload categories clearly', () => {
+    expect(CLIENT_DOCUMENT_SECTIONS.map(({ label, description }) => [label, description])).toEqual([
+      ['Company documents', 'Setup and registration documents'],
+      ['Payroll', 'Payslips and timesheets'],
+      ['Accounting', 'Monthly · bank statements, invoices, cash and fuel receipts'],
+      ['Correspondence', 'Letters from authorities, contracts, leases, and other documents'],
+    ]);
+  });
+
   it('groups client uploads into the four dashboard sections', () => {
     const uploads = [
       { ...CLIENT_DEMO_DOCUMENTS[0], area: undefined, id: 'company', category: 'company_formation' as const },

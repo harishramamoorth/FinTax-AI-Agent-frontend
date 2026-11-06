@@ -22,7 +22,7 @@ import StatFlow from './StatFlow';
 import { BottomBar, CountUp, DocCards, NavDrawer, PALETTE, type NavEntry } from './WorkspaceChrome';
 import { FlowDiagram, PulseHero, StaffWorkflow } from './PulseUI';
 import MonthSubmissionsPanel from './MonthSubmissionsPanel';
-import { demoClientIdentityById, documentsVisibleTo } from './storage/selectors';
+import { clientUploadsVisibleToStaff, demoClientIdentityById, documentsVisibleTo } from './storage/selectors';
 import { CLIENT_DOCUMENT_SECTIONS, documentsInClientSection, type ClientDocumentSectionId } from './clientDocumentSections';
 import fintaxLogo from './fintax-logo.png';
 
@@ -111,8 +111,12 @@ export default function TeamWorkspace({ role, userName, onSignOut }: { role: Dem
     allDocuments,
     role,
     role === 'staff' ? staffProfile?.id ?? userName : userName,
-    userName,
-  ), [allDocuments, role, staffProfile?.id, userName]);
+    role === 'staff' ? staffProfile?.name ?? userName : userName,
+    role === 'staff' && staffProfile?.loginName ? [userName, staffProfile.loginName] : [userName],
+  ), [allDocuments, role, staffProfile?.id, staffProfile?.loginName, staffProfile?.name, userName]);
+  const clientUploadDocuments = useMemo(() => role === 'staff'
+    ? clientUploadsVisibleToStaff(allDocuments, staffProfile?.id ?? userName, staffProfile?.name ?? userName, [userName, staffProfile?.loginName ?? ''])
+    : sharedDocuments, [allDocuments, role, sharedDocuments, staffProfile?.id, staffProfile?.loginName, staffProfile?.name, userName]);
   const assistantQuestions = useDemoDocumentsStore((state) => state.assistantQuestions);
   const followUpTasks = useDemoDocumentsStore((state) => state.followUpTasks);
   const bankLinks = useDemoDocumentsStore((state) => state.bankLinks);
@@ -163,7 +167,7 @@ export default function TeamWorkspace({ role, userName, onSignOut }: { role: Dem
       if (current.storageError) setNotice(`Shared browser storage could not be loaded: ${current.storageError}`);
       stopSync = startSharedStorageSync((document) => {
         const actorId = role === 'staff' ? staffProfile?.id ?? userName : userName;
-        if (role === 'staff' && !documentsVisibleTo([document], 'staff', actorId, userName).length) return;
+        if (role === 'staff' && !clientUploadsVisibleToStaff([document], actorId, staffProfile?.name ?? userName, [userName, staffProfile?.loginName ?? '']).length) return;
         const client = demoClientIdentityById(document.clientId);
         setSelectedId(document.id);
         setNotice(role === 'admin'
@@ -194,7 +198,7 @@ export default function TeamWorkspace({ role, userName, onSignOut }: { role: Dem
       disposed = true;
       stopSync?.();
     };
-  }, [addFollowUpTask, addSharedDocument, hydrateSharedStorage, role, staffProfile?.id, startSharedStorageSync, userName]);
+  }, [addFollowUpTask, addSharedDocument, hydrateSharedStorage, role, staffProfile?.id, staffProfile?.loginName, staffProfile?.name, startSharedStorageSync, userName]);
 
   useEffect(() => {
     if (!notice) return;
@@ -229,6 +233,10 @@ export default function TeamWorkspace({ role, userName, onSignOut }: { role: Dem
   }, [screen]);
 
   const openDocumentReview = (document: DemoDocument) => {
+    if (role === 'staff' && document.clientSaved === false) {
+      setNotice(`${document.name} is waiting for the client to save it before staff review.`);
+      return;
+    }
     setSelectedId(document.id);
     setScreen('review');
   };
@@ -506,7 +514,7 @@ export default function TeamWorkspace({ role, userName, onSignOut }: { role: Dem
     <div
       ref={workspaceRef}
       data-theme={role === 'admin' ? 'light' : undefined}
-      className={`h-screen h-dvh overflow-x-hidden overflow-y-auto bg-bg text-ink ${role === 'admin' && screen === 'overview' ? 'admin-mobile-overview-shell' : ''}`}
+      className={`workspace-shell h-screen h-dvh overflow-x-hidden overflow-y-auto bg-bg text-ink ${role === 'admin' && screen === 'overview' ? 'admin-mobile-overview-shell' : ''}`}
       style={role === 'admin' ? { background: 'radial-gradient(1100px 520px at 50% -8%, #ffffff 0%, rgba(255,255,255,0) 70%), linear-gradient(#e8eef8, #eef2f9)' } : undefined}
     >
       <header className={`workspace-topbar sticky top-0 z-20 ${role === 'admin' ? 'border-0 bg-transparent px-2 pt-2 sm:px-4' : 'border-b hairline bg-bg2/95'}`}>
@@ -543,7 +551,7 @@ export default function TeamWorkspace({ role, userName, onSignOut }: { role: Dem
             screen={screen}
             userName={userName}
             reviewCount={reviewDocuments.length}
-            uploadCount={documents.filter((document) => !document.sample && Boolean(document.clientId)).length}
+            uploadCount={clientUploadDocuments.filter((document) => !document.sample).length}
             questionCount={openClientQuestions}
             onNavigate={navigateTo}
           />
@@ -558,7 +566,7 @@ export default function TeamWorkspace({ role, userName, onSignOut }: { role: Dem
           {notice && <div role="status" className="demo-enter flex items-start gap-2 rounded-lg border border-cyan/20 bg-cyan/5 px-3 py-2.5 text-sm"><CheckCircle2 className="mt-0.5 size-4 shrink-0 text-cyan" /><span className="min-w-0 flex-1">{notice}</span><button type="button" aria-label="Dismiss notice" onClick={() => setNotice('')}><X className="size-4 text-muted" /></button></div>}
 
           <motion.div key={screen} className="space-y-5 sm:space-y-6" initial={reduce ? false : { opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
-          {screen === 'overview' && <Overview role={role === 'admin' ? 'admin' : 'staff'} userName={userName} documents={documents} tasks={followUpTasks} questions={assistantQuestions} roleAssignments={roleAssignments} reviewCount={reviewDocuments.length} reviewDocuments={reviewDocuments} approvedCount={approvedCount} openQuestions={openClientQuestions} onNavigate={navigateTo} onOpenDocument={(item) => { setSelectedId(item.id); setScreen('review'); }} />}
+          {screen === 'overview' && <Overview role={role === 'admin' ? 'admin' : 'staff'} userName={userName} documents={documents} tasks={followUpTasks} questions={assistantQuestions} roleAssignments={roleAssignments} reviewCount={reviewDocuments.length} reviewDocuments={reviewDocuments} approvedCount={approvedCount} openQuestions={openClientQuestions} onNavigate={navigateTo} onOpenDocument={openDocumentReview} />}
           {screen === 'documents' && <DocumentsPanel
             adminStyle={role === 'admin'}
             documents={filteredDocuments} search={search} onSearch={setSearch} onDrop={handleDrop}
@@ -567,7 +575,7 @@ export default function TeamWorkspace({ role, userName, onSignOut }: { role: Dem
             category={uploadCategory} onCategoryChange={setUploadCategory}
             onBrowse={() => fileInput.current?.click()}
             uploadError={uploadError} selectedId={selectedId}
-            onSelect={(document) => { setSelectedId(document.id); setScreen('review'); }}
+            onSelect={openDocumentReview}
             staffUsers={roleAssignments.filter((assignment) => assignment.role === 'staff' && assignment.active !== false)}
             clientProfiles={roleAssignments.filter((assignment) => assignment.role === 'client')}
             onAssign={(documentId, staffId) => {
@@ -598,7 +606,7 @@ export default function TeamWorkspace({ role, userName, onSignOut }: { role: Dem
             onRequestCorrection={requestCorrection} onReject={rejectSelected} onNavigate={navigateTo} onReturnToReview={returnDocumentToReview}
           />}
           {screen === 'uploads' && <ClientUploadsPanel
-            documents={documents.filter((document) => !document.sample && Boolean(document.clientId))}
+            documents={clientUploadDocuments.filter((document) => !document.sample && Boolean(document.clientId))}
             adminStyle={role === 'admin'}
             staffUsers={roleAssignments.filter((assignment) => assignment.role === 'staff' && assignment.active !== false)}
             clientProfiles={roleAssignments.filter((assignment) => assignment.role === 'client')}
@@ -1309,6 +1317,7 @@ function ClientUploadsPanel({
   const [page, setPage] = useState(0);
   const filterTriggerRef = useRef<HTMLButtonElement>(null);
   const filterCloseRef = useRef<HTMLButtonElement>(null);
+  const filterDialogRef = useRef<HTMLElement>(null);
   const filterWasOpen = useRef(false);
   const pageSize = 10;
   const query = searchParams.get('uploadsQ') ?? '';
@@ -1375,8 +1384,11 @@ function ClientUploadsPanel({
   const selectedClientId = clientRows.some((client) => client.clientId === requestedClientId) ? requestedClientId : 'all';
   const selectedClient = clientRows.find((client) => client.clientId === selectedClientId);
   const trackedDocuments = selectedClientId === 'all' ? documents : selectedClient?.documents ?? [];
-  const processingCount = trackedDocuments.filter((item) => item.status === 'processing').length;
-  const reviewCount = trackedDocuments.filter((item) => ['review', 'needs_information', 'action_required', 'password_required', 'rejected'].includes(item.status)).length;
+  const reviewableDocuments = adminStyle
+    ? trackedDocuments
+    : trackedDocuments.filter((item) => item.clientSaved !== false);
+  const processingCount = reviewableDocuments.filter((item) => item.status === 'processing').length;
+  const reviewCount = reviewableDocuments.filter((item) => ['review', 'needs_information', 'action_required', 'password_required', 'rejected'].includes(item.status)).length;
   const completedCount = trackedDocuments.filter((item) => item.status === 'approved').length;
   const bySection = (section: ClientDocumentSectionId | 'all') => section === 'all'
     ? trackedDocuments
@@ -1388,7 +1400,7 @@ function ClientUploadsPanel({
     const matchesQuery = `${item.name} ${item.clientId ?? ''} ${client?.name ?? ''} ${client?.email ?? ''} ${labelFor(item.category)} ${item.fields.counterparty} ${item.fields.reference}`
       .toLowerCase().includes(query.trim().toLowerCase());
     const matchesStatus = statusFilter === 'all'
-      || (statusFilter === 'pending' && ['processing', 'review', 'needs_information', 'action_required', 'password_required', 'rejected'].includes(item.status))
+      || (statusFilter === 'pending' && (item.clientSaved === false || ['processing', 'review', 'needs_information', 'action_required', 'password_required', 'rejected'].includes(item.status)))
       || (statusFilter === 'processing' && item.status === 'processing')
       || (statusFilter === 'review' && item.status === 'review')
       || (statusFilter === 'attention' && ['needs_information', 'action_required', 'password_required', 'rejected'].includes(item.status))
@@ -1413,6 +1425,7 @@ function ClientUploadsPanel({
     ...CLIENT_DOCUMENT_SECTIONS.map((section) => ({
       id: section.id,
       label: section.label,
+      description: section.description,
       count: documentsInClientSection(trackedDocuments, section.id).length,
     }))];
   const panelClass = adminStyle ? '!rounded-3xl !border-white/80 !bg-white/90 shadow-[0_24px_60px_-34px_rgba(60,80,140,.35)]' : '';
@@ -1423,22 +1436,48 @@ function ClientUploadsPanel({
 
   useEffect(() => {
     if (!filterSheetOpen) return;
+    const scrollContainer = document.querySelector<HTMLElement>('.workspace-shell');
+    const previousOverflow = scrollContainer?.style.overflowY;
+    if (scrollContainer) scrollContainer.style.overflowY = 'hidden';
+    const dialog = filterDialogRef.current;
+    const focusFrame = window.requestAnimationFrame(() => filterCloseRef.current?.focus());
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setFilterSheetOpen(false);
+      if (event.key !== 'Tab' || !dialog) return;
+      const focusable = [...dialog.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      )];
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener('keydown', closeOnEscape);
+      if (scrollContainer && previousOverflow !== undefined) scrollContainer.style.overflowY = previousOverflow;
+    };
   }, [filterSheetOpen]);
 
   useEffect(() => {
     if (filterSheetOpen) {
       filterWasOpen.current = true;
-      filterCloseRef.current?.focus();
     } else if (filterWasOpen.current) {
       filterWasOpen.current = false;
       filterTriggerRef.current?.focus();
     }
   }, [filterSheetOpen]);
+
+  useEffect(() => {
+    if (page >= pageCount) setPage(Math.max(0, pageCount - 1));
+  }, [page, pageCount]);
 
   if (error) {
     return <Panel className={panelClass}><ErrorState message={`Shared browser storage could not be loaded: ${error}`} /></Panel>;
@@ -1454,9 +1493,9 @@ function ClientUploadsPanel({
 
   return <div className="mx-auto w-full max-w-[1280px] space-y-4 sm:space-y-5">
     <div className="grid grid-cols-3 gap-2 sm:gap-3">
-      <UploadMetric adminStyle={adminStyle} title="Documents received" value={trackedDocuments.length} caption="All client files" icon={FileText} active={statusFilter === 'all'} onClick={() => updateUploadParam('uploadsStatus', 'all')} />
-      <UploadMetric adminStyle={adminStyle} title="Awaiting review" value={reviewCount + processingCount} caption="Needs a next step" icon={ClipboardCheck} active={statusFilter === 'pending'} onClick={() => updateUploadParam('uploadsStatus', 'pending')} />
-      <UploadMetric adminStyle={adminStyle} title="Completed" value={completedCount} caption="Approved documents" icon={CheckCircle2} active={statusFilter === 'completed'} onClick={() => updateUploadParam('uploadsStatus', 'completed')} />
+      <UploadMetric adminStyle={adminStyle} title="Documents received" mobileTitle="Received" value={trackedDocuments.length} caption="All client files" icon={FileText} active={statusFilter === 'all'} onClick={() => updateUploadParam('uploadsStatus', 'all')} />
+      <UploadMetric adminStyle={adminStyle} title="Awaiting review" mobileTitle="Review" value={reviewCount + processingCount} caption="Needs a next step" icon={ClipboardCheck} active={statusFilter === 'pending'} onClick={() => updateUploadParam('uploadsStatus', 'pending')} />
+      <UploadMetric adminStyle={adminStyle} title="Completed" mobileTitle="Done" value={completedCount} caption="Approved documents" icon={CheckCircle2} active={statusFilter === 'completed'} onClick={() => updateUploadParam('uploadsStatus', 'completed')} />
     </div>
     <Panel className={`overflow-hidden ${panelClass}`}>
       <div className="flex flex-col items-stretch justify-between gap-3 border-b hairline px-4 py-3.5 sm:flex-row sm:items-center sm:px-5">
@@ -1486,6 +1525,7 @@ function ClientUploadsPanel({
           {CLIENT_DOCUMENT_SECTIONS.map((section) => <button key={section.id} type="button" onClick={() => updateUploadParam('uploadsCategory', section.id)} className={`rounded-xl border p-3 text-left hover:bg-ink/5 ${sectionId === section.id ? 'border-cyan/30 bg-cyan/10' : 'border-line/15'}`}>
             <span className="block truncate text-[10px] text-muted">{section.label}</span>
             <span className="mt-1 block text-lg font-semibold">{documentsInClientSection(selectedClient.documents, section.id).length}</span>
+            <span className="mt-1 block line-clamp-2 text-[10px] leading-4 text-muted">{section.description}</span>
           </button>)}
         </div>
         <div className="rounded-xl border border-line/15 bg-bg2/70 p-3">
@@ -1498,7 +1538,7 @@ function ClientUploadsPanel({
     </Panel>}
     <Panel className={`overflow-hidden ${panelClass}`}>
       <div className="border-b hairline px-4 py-3.5 sm:px-5">
-        <h2 className="text-base font-semibold">Client uploads</h2><p className="mt-1 text-sm text-muted">One place to triage, assign, and review client-submitted documents.</p>
+        <h2 className="text-base font-semibold">Client uploads</h2><p className="mt-1 text-sm text-muted">New uploads appear as soon as received. Staff review starts after the client reviews and saves the document details.</p>
       </div>
       <div className="sticky top-[60px] z-20 border-b hairline bg-bg2/95 px-3 py-3 backdrop-blur sm:px-4 lg:static lg:px-5">
         <div className="flex items-center gap-2 lg:gap-3">
@@ -1511,24 +1551,25 @@ function ClientUploadsPanel({
             <option value="all">All statuses</option><option value="pending">Awaiting next step</option><option value="processing">Processing</option><option value="review">Ready for review</option><option value="attention">Needs attention</option><option value="completed">Completed</option>
           </select>
           <button ref={filterTriggerRef} type="button" onClick={() => setFilterSheetOpen(true)} aria-label={`Open upload filters${hasActiveFilters ? ', filters active' : ''}`} className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-xl border hairline bg-bg2 px-3 text-sm font-medium text-ink/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan lg:hidden">
-            <Filter className="size-4" />Filters{hasActiveFilters ? <span className="size-2 rounded-full bg-cyan" /> : null}
+            <Filter className="size-4" /><span className="hidden min-[360px]:inline">Filters</span><span className="min-[360px]:hidden">Filter</span>{hasActiveFilters ? <span className="size-2 rounded-full bg-cyan" /> : null}
           </button>
           <div className="hidden min-w-0 flex-1 items-center gap-2 overflow-x-auto lg:flex" role="tablist" aria-label="Filter uploads by client section">
             <UploadCategoryChips sections={sectionCounts} selected={sectionId} onSelect={(value) => updateUploadParam('uploadsCategory', value)} />
           </div>
           {hasActiveFilters && <button type="button" onClick={clearFilters} className="hidden min-h-11 shrink-0 rounded-lg px-2 text-sm font-medium text-cyan hover:bg-cyan/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan lg:inline-flex lg:items-center">Clear filters</button>}
         </div>
+        <div className="mt-2 flex gap-2 overflow-x-auto pb-1 lg:hidden" role="tablist" aria-label="Filter uploads by client section">
+          <UploadCategoryChips sections={sectionCounts} selected={sectionId} onSelect={(value) => updateUploadParam('uploadsCategory', value)} />
+          {hasActiveFilters && <button type="button" onClick={clearFilters} className="min-h-11 shrink-0 rounded-full px-3 text-xs font-medium text-cyan hover:bg-cyan/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan">Clear all</button>}
+        </div>
+        {sectionId !== 'all' && <p className="mt-2 text-xs leading-5 text-muted">{CLIENT_DOCUMENT_SECTIONS.find((section) => section.id === sectionId)?.description}</p>}
         {filterSheetOpen && createPortal(<div className="fixed inset-0 z-[80] flex items-end bg-slate-950/40 lg:hidden" role="presentation" onClick={() => setFilterSheetOpen(false)}>
-          <section role="dialog" aria-modal="true" aria-labelledby="upload-filter-heading" className="w-full rounded-t-2xl bg-bg2 p-4 pb-[calc(env(safe-area-inset-bottom)+16px)] text-ink shadow-2xl" onClick={(event) => event.stopPropagation()}>
+          <section ref={filterDialogRef} role="dialog" aria-modal="true" aria-labelledby="upload-filter-heading" className="w-full rounded-t-2xl bg-bg2 p-4 pb-[calc(env(safe-area-inset-bottom)+16px)] text-ink shadow-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between"><h3 id="upload-filter-heading" className="text-base font-semibold">Filters</h3><button ref={filterCloseRef} type="button" aria-label="Close filters" onClick={() => setFilterSheetOpen(false)} className="grid size-11 place-items-center rounded-lg text-muted hover:bg-ink/5 focus-visible:outline-2 focus-visible:outline-cyan"><X className="size-5" /></button></div>
             <label className="mt-3 block text-sm font-medium text-ink/80" htmlFor="mobile-upload-status-filter">Status</label>
             <select id="mobile-upload-status-filter" value={statusFilter} onChange={(event) => updateUploadParam('uploadsStatus', event.target.value)} className="mt-1 h-11 w-full rounded-xl border hairline bg-bg2 px-3 text-sm text-ink focus-visible:outline-2 focus-visible:outline-cyan">
               <option value="all">All statuses</option><option value="pending">Awaiting next step</option><option value="processing">Processing</option><option value="review">Ready for review</option><option value="attention">Needs attention</option><option value="completed">Completed</option>
             </select>
-            <p className="mt-4 text-sm font-medium text-ink/80">Category</p>
-            <div className="mt-2 flex gap-2 overflow-x-auto pb-2" role="tablist" aria-label="Filter uploads by client section">
-              <UploadCategoryChips sections={sectionCounts} selected={sectionId} onSelect={(value) => updateUploadParam('uploadsCategory', value)} />
-            </div>
             <div className="mt-3 flex gap-2">
               <Button className="min-h-11 flex-1" variant="primary" onClick={() => setFilterSheetOpen(false)}>Show {visibleDocuments.length} uploads</Button>
               {hasActiveFilters && <Button className="min-h-11" onClick={clearFilters}>Clear</Button>}
@@ -1553,7 +1594,7 @@ function ClientUploadsPanel({
             </div>
             <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
               <UploadStatus document={item} />
-              <UploadMoreActions item={item} onOpenReview={onOpenReview} onTrackClient={(clientId) => updateUploadParam('uploadsClient', clientId)} />
+              <UploadMoreActions item={item} reviewDisabled={!adminStyle && item.clientSaved === false} onOpenReview={onOpenReview} onTrackClient={(clientId) => updateUploadParam('uploadsClient', clientId)} />
             </div>
             <p className="mt-2 truncate text-sm font-medium text-ink">{client?.name ?? 'Client not identified'} <span className="font-normal text-muted">· {client?.email ?? item.clientId ?? 'No client account'}</span></p>
             <p className="mt-1 text-xs leading-5 text-muted">{labelFor(item.category)} · {(item.name.split('.').pop() ?? 'file').toUpperCase()} · {new Date(item.createdAt).toLocaleDateString()} · {formatBytes(item.sizeBytes)}</p>
@@ -1569,8 +1610,8 @@ function ClientUploadsPanel({
                   <option value="">Unassigned</option>{staffUsers.map((staff) => <option key={staff.id} value={staff.id}>{staff.name}</option>)}
                 </select> : null}
               </div>
-              <Button className="min-h-11 w-full px-3" variant={adminStyle ? 'primary' : 'outline'} onClick={() => onOpenReview(item)}>
-                {item.status === 'approved' ? 'View details' : item.status === 'processing' ? 'View progress' : 'Process document'}
+              <Button className="min-h-11 w-full px-3" variant={adminStyle ? 'primary' : 'outline'} disabled={!adminStyle && item.clientSaved === false} title={!adminStyle && item.clientSaved === false ? 'Available after the client saves the document details' : undefined} onClick={() => onOpenReview(item)}>
+                {!adminStyle && item.clientSaved === false ? 'Awaiting client submission' : item.status === 'approved' ? 'View details' : item.status === 'processing' ? 'View progress' : 'Process document'}
               </Button>
             </div>
           </li>;
@@ -1601,8 +1642,8 @@ function ClientUploadsPanel({
                   </td>
                   <td className="px-3 py-3.5">
                     <div className="flex items-center justify-end gap-1">
-                      <Button className="min-h-11 px-2" size="sm" variant={adminStyle ? 'primary' : 'outline'} onClick={() => onOpenReview(item)}>{item.status === 'approved' ? 'View details' : item.status === 'processing' ? 'View progress' : 'Process document'}</Button>
-                      <UploadMoreActions item={item} onOpenReview={onOpenReview} onTrackClient={(clientId) => updateUploadParam('uploadsClient', clientId)} />
+                      <Button className="min-h-11 px-2" size="sm" variant={adminStyle ? 'primary' : 'outline'} disabled={!adminStyle && item.clientSaved === false} title={!adminStyle && item.clientSaved === false ? 'Available after the client saves the document details' : undefined} onClick={() => onOpenReview(item)}>{!adminStyle && item.clientSaved === false ? 'Awaiting client submission' : item.status === 'approved' ? 'View details' : item.status === 'processing' ? 'View progress' : 'Process document'}</Button>
+                      <UploadMoreActions item={item} reviewDisabled={!adminStyle && item.clientSaved === false} onOpenReview={onOpenReview} onTrackClient={(clientId) => updateUploadParam('uploadsClient', clientId)} />
                     </div>
                   </td>
                 </tr>;
@@ -1635,20 +1676,21 @@ type UploadStatusFilter = 'all' | 'pending' | 'processing' | 'review' | 'attenti
 function UploadCategoryChips({
   sections, selected, onSelect,
 }: {
-  sections: { id: ClientDocumentSectionId | 'all'; label: string; count: number }[];
+  sections: { id: ClientDocumentSectionId | 'all'; label: string; description?: string; count: number }[];
   selected: ClientDocumentSectionId | 'all';
   onSelect: (id: ClientDocumentSectionId | 'all') => void;
 }) {
-  return <>{sections.map((section) => <button key={section.id} type="button" role="tab" aria-selected={selected === section.id} onClick={() => onSelect(section.id)} className={`inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full border px-3 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan ${selected === section.id ? 'border-cyan/30 bg-cyan/10 text-cyan' : 'border-line/20 bg-bg2 text-ink/80 hover:bg-ink/5'}`}>
+  return <>{sections.map((section) => <button key={section.id} type="button" role="tab" aria-selected={selected === section.id} aria-label={`${section.label}${section.description ? `: ${section.description}` : ''}. ${section.count} uploads`} onClick={() => onSelect(section.id)} className={`inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full border px-3 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan ${selected === section.id ? 'border-cyan/30 bg-cyan/10 text-cyan' : 'border-line/20 bg-bg2 text-ink/80 hover:bg-ink/5'}`}>
     {section.label}<span className="rounded-full bg-ink/5 px-1.5 py-0.5 text-xs tabular-nums">{section.count}</span>
   </button>)}</>;
 }
 
 function UploadMetric({
-  adminStyle, title, value, caption, icon: Icon, active, onClick,
+  adminStyle, title, mobileTitle, value, caption, icon: Icon, active, onClick,
 }: {
   adminStyle: boolean;
   title: string;
+  mobileTitle: string;
   value: number;
   caption: string;
   icon: typeof FileText;
@@ -1656,14 +1698,15 @@ function UploadMetric({
   onClick: () => void;
 }) {
   return <button type="button" aria-label={`${title}: ${value}. ${caption}`} aria-pressed={active} onClick={onClick} className={`min-w-0 rounded-xl border p-2.5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan sm:p-4 ${active ? 'border-cyan/40 bg-cyan/[.045]' : 'border-line/20 bg-bg2'} ${adminStyle ? 'shadow-[0_12px_30px_-24px_rgba(60,80,140,.5)]' : ''}`}>
-    <span className="flex items-center justify-between gap-1"><span className="line-clamp-2 text-xs font-medium leading-4 text-ink/80 sm:text-sm">{title}</span><span className="hidden size-8 shrink-0 place-items-center rounded-lg bg-cyan/10 text-cyan sm:grid"><Icon className="size-4" /></span></span>
+    <span className="flex items-center justify-between gap-1"><span className="line-clamp-2 text-xs font-medium leading-4 text-ink/80 sm:text-sm"><span className="sm:hidden">{mobileTitle}</span><span className="hidden sm:inline">{title}</span></span><span className="hidden size-8 shrink-0 place-items-center rounded-lg bg-cyan/10 text-cyan sm:grid"><Icon className="size-4" /></span></span>
     <span className="mt-1 block text-xl font-semibold leading-6 tabular-nums text-ink sm:text-2xl sm:leading-7">{value}</span>
     <span className="mt-0.5 hidden text-xs text-muted sm:block">{caption}</span>
   </button>;
 }
 
 function UploadStatus({ document }: { document: DemoDocument }) {
-  const status: Record<DemoDocument['status'], { label: string; tone: 'ok' | 'warn' | 'bad' | 'cyan'; Icon: typeof CheckCircle2 }> = {
+  type StatusDisplay = { label: string; tone: 'ok' | 'warn' | 'bad' | 'cyan'; Icon: typeof CheckCircle2 };
+  const status: Record<DemoDocument['status'], StatusDisplay> = {
     processing: { label: 'Processing locally', tone: 'cyan', Icon: Clock3 },
     review: { label: 'Awaiting review', tone: 'warn', Icon: FileClock },
     approved: { label: 'Completed', tone: 'ok', Icon: CheckCircle2 },
@@ -1672,7 +1715,11 @@ function UploadStatus({ document }: { document: DemoDocument }) {
     needs_information: { label: 'Needs information', tone: 'warn', Icon: CircleAlert },
     rejected: { label: 'Rejected', tone: 'bad', Icon: CircleAlert },
   };
-  const value = status[document.status];
+  const value: StatusDisplay = document.clientSaved === false
+    ? document.status === 'processing'
+      ? { label: 'Client processing', tone: 'cyan', Icon: Clock3 }
+      : { label: 'Awaiting client submission', tone: 'warn', Icon: FileClock }
+    : status[document.status];
   const progress = Math.max(0, Math.min(100, document.processingProgress ?? 0));
   return <span className="inline-flex max-w-full flex-col items-start gap-1">
     <Badge tone={value.tone} className="max-w-full text-xs"><value.Icon className="size-3.5 shrink-0" />{value.label}</Badge>
@@ -1684,9 +1731,10 @@ function UploadStatus({ document }: { document: DemoDocument }) {
 }
 
 function UploadMoreActions({
-  item, onOpenReview, onTrackClient,
+  item, reviewDisabled = false, onOpenReview, onTrackClient,
 }: {
   item: DemoDocument;
+  reviewDisabled?: boolean;
   onOpenReview: (document: DemoDocument) => void;
   onTrackClient: (clientId: string) => void;
 }) {
@@ -1695,7 +1743,7 @@ function UploadMoreActions({
       <MoreHorizontal className="size-5" />
     </summary>
     <div className="absolute end-0 top-full z-30 min-w-44 rounded-xl border hairline bg-bg2 p-1.5 shadow-xl">
-      <button type="button" onClick={() => onOpenReview(item)} className="min-h-11 w-full rounded-lg px-3 text-left text-sm text-ink/80 hover:bg-ink/5 focus-visible:outline-2 focus-visible:outline-cyan">Open document review</button>
+      <button type="button" disabled={reviewDisabled} title={reviewDisabled ? 'Available after the client saves the document details' : undefined} onClick={() => onOpenReview(item)} className="min-h-11 w-full rounded-lg px-3 text-left text-sm text-ink/80 hover:bg-ink/5 focus-visible:outline-2 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-50">{reviewDisabled ? 'Awaiting client submission' : 'Open document review'}</button>
       {item.clientId && <button type="button" onClick={() => onTrackClient(item.clientId!)} className="min-h-11 w-full rounded-lg px-3 text-left text-sm text-ink/80 hover:bg-ink/5 focus-visible:outline-2 focus-visible:outline-cyan">Track this client</button>}
     </div>
   </details>;

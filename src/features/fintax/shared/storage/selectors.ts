@@ -26,14 +26,31 @@ export function documentsVisibleTo(
   role: 'client' | 'staff' | 'admin',
   actorId: string,
   actorName = actorId,
+  actorAliases: string[] = [],
 ): DemoDocument[] {
   return documents.filter((document) => {
     if (!document.clientId) return role !== 'client';
     if (role === 'admin') return true;
-    if (role === 'staff' && document.clientSaved === false && !document.assignedStaffId) return false;
-    if (role === 'staff' && document.assignedStaffId) return document.assignedStaffId === actorId || document.assignedStaffId === actorName;
+    if (role === 'staff' && document.clientSaved === false) return false;
+    if (role === 'staff' && document.assignedStaffId) return [actorId, actorName, ...actorAliases].includes(document.assignedStaffId);
     const client = demoClientById(document.clientId);
     return client ? canAccessClientData(role, actorName, client) : false;
+  });
+}
+
+export function clientUploadsVisibleToStaff(
+  documents: DemoDocument[],
+  actorId: string,
+  actorName = actorId,
+  actorAliases: string[] = [],
+): DemoDocument[] {
+  return documents.filter((document) => {
+    if (!document.clientId) return false;
+    if (document.assignedStaffId) {
+      return [actorId, actorName, ...actorAliases].includes(document.assignedStaffId);
+    }
+    const client = demoClientById(document.clientId);
+    return client ? canAccessClientData('staff', actorName, client) : false;
   });
 }
 
